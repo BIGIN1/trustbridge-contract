@@ -1019,6 +1019,11 @@ and emits both `RemovedEvent` and `ChallengeCompletedEvent`.
 `cancel_challenge` is the escape hatch: if the registrant proves ownership off-chain
 during the window, the admin cancels the challenge and the registration is preserved.
 
+The full lifecycle — happy path, cancel path, `ChallengeAlreadyActive`,
+`ChallengeNotResolvable`, `NoChallengeActive`, `NotAuthorized`, `Paused`, and the
+count invariants across all four entry points — is enforced by tests, not left as a
+comment: `tests/challenge.rs`.
+
 ---
 
 ## Address Rotation Delay (Issue #234)

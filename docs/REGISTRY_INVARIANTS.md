@@ -67,6 +67,31 @@ compacts, re-registers the exact same names at new addresses, then asserts
 `get_stats().total`, `get_verified_count()`, the chunked index, and a full
 paginated walk all agree with the live record set (I10).
 
+### Challenge-period operations preserve count invariants (Issue #214)
+
+The squatter-challenge flow (`start_challenge`, `cancel_challenge`,
+`complete_challenge`, `get_challenge`) sits **outside** the registry counters:
+
+- `start_challenge` and `cancel_challenge` write only the per-username
+  `(chllng, username)` challenge record. They never touch `COUNT_KEY`,
+  `VCOUNT_KEY`, the flat/chunked index, or any `ContributorRecord`, so I1–I6
+  are unaffected by them and no fuzz arm is needed for them.
+- `complete_challenge` removes a live record and decrements the counters
+  through exactly the same code paths `remove` uses (`remove_record` +
+  `remove_from_index` + saturating decrements), so I1, I2, and I5 hold after a
+  completed challenge exactly as they do after a `remove` — and the `remove`
+  path itself *is* fuzz-covered, so the count-affecting branch needs no
+  separate arm.
+- A registrant's self-`remove` during the challenge window clears the
+  challenge atomically (`remove` calls `remove_challenge` on success) and
+  follows the ordinary `remove` counter path.
+- Every rejected challenge call — `ChallengeAlreadyActive`,
+  `ChallengeNotResolvable`, `NoChallengeActive`, `NotAuthorized`, `Paused` —
+  returns before any state write, so I7 (rejected operations mutate nothing)
+  applies unchanged.
+
+End-to-end coverage for all of the above lives in `tests/challenge.rs`.
+
 ---
 
 ## How the Fuzzing Works
@@ -135,7 +160,13 @@ When adding a contract function that mutates state:
 2. Update `Shadow` so the model predicts the new state transition.
 3. Add the resulting invariant to the table above.
 
-A new mutating function with no fuzz arm is a review blocker.
+A new mutating function with no fuzz arm is a review blocker. The lone
+documented exception is the challenge-period flow (Issue #214): its mutators
+either never touch registry counters (`start_challenge` / `cancel_challenge`)
+or remove a record through the already-fuzzed `remove` counter path
+(`complete_challenge`) — see *Challenge-period operations preserve count
+invariants* above. Any other registry-mutating function must be modelled and
+fuzzed.
 
 ---
 
