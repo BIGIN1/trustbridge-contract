@@ -238,7 +238,7 @@ mod test {
 
         let events = env.events().all();
         assert!(
-            events.events().is_empty(),
+            events.is_empty(),
             "No events expected after initialize"
         );
     }
@@ -374,5 +374,71 @@ pub struct GuardianChangedEvent {
     /// `None` when the guardian was removed.
     pub guardian: Option<Address>,
     pub admin: Address,
+    pub timestamp: u64,
+}
+
+// ── Staged WASM events (Issue #300) ────────────────────────────────────────────
+
+/// Emitted when a WASM hash is staged for the next upgrade (Issue #300).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WasmStagedEvent {
+    pub wasm_hash: BytesN<32>,
+    pub staged_by: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when the staged WASM slot is cleared (Issue #300).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StagedWasmClearedEvent {
+    pub wasm_hash: BytesN<32>,
+    pub cleared_by: Address,
+    pub timestamp: u64,
+}
+
+// ── Multisig upgrade events (Issue #301) ───────────────────────────────────────
+
+/// Emitted when a multisig upgrade proposal is created (Issue #301).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposedEvent {
+    pub proposal_id: u32,
+    pub wasm_hash: BytesN<32>,
+    pub proposed_by: Address,
+    pub executable_at: u64,
+    pub timestamp: u64,
+}
+
+/// Emitted when an admin or Upgrader approves a pending upgrade proposal
+/// (Issue #301).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeApprovedEvent {
+    pub proposal_id: u32,
+    pub approved_by: Address,
+    pub approval_count: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when a pending upgrade proposal is cancelled (Issue #301).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposalCancelledEvent {
+    pub proposal_id: u32,
+    pub wasm_hash: BytesN<32>,
+    pub cancelled_by: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a pending upgrade proposal is executed after its delay has
+/// elapsed and the approval threshold has been met (Issue #301).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposalExecutedEvent {
+    pub proposal_id: u32,
+    pub wasm_hash: BytesN<32>,
+    pub executed_by: Address,
+    pub approval_count: u32,
     pub timestamp: u64,
 }

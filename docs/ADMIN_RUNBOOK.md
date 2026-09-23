@@ -14,6 +14,7 @@ Related docs: [SECURITY](SECURITY.md) · [ABI](ABI.md) · [DEPLOYMENT](DEPLOYMEN
     [Roles](#role-recipes) · [Verification](#verification-recipes) ·
     [Registry maintenance](#registry-maintenance-recipes) ·
     [Upgrade & attestation](#upgrade--attestation-recipes) ·
+    [Multisig upgrade](#multisig-upgrade-flow-issue-301) ·
     [Admin transfer](#admin-transfer-recipes) · [Export](#export-recipes)
 - [Storage TTL Maintenance (Keeper)](#storage-ttl-maintenance-keeper)
 - [Emergency Pause Lifecycle](#emergency-pause-lifecycle)
@@ -390,6 +391,84 @@ stellar contract invoke --id "$CONTRACT_ID" --source-account admin --network "$N
 - **Auth:** admin only. `new_version` must be strictly greater than the current
   (`InvalidVersion` otherwise). Runs any registered migration steps. Confirm
   with `-- get_version`.
+
+---
+
+### Multisig upgrade flow (Issue #301)
+
+An on-chain M-of-N governance flow that sits alongside the single-signature
+`upgrade` path. Instead of one admin key, a WASM upgrade requires a proposal,
+`get_upgrade_threshold()` **distinct** approvals, and a delay window before it
+can be executed. The proposer counts as one approval; the threshold defaults to
+`1`, which behaves exactly like the old single-admin flow.
+
+```text
+proposer (admin or Upgrader) → propose_multisig_upgrade(wasm_hash, delay_secs)
+                                                    ↓ UpgradeProposedEvent
+  distinct signers (admin / Upgrader)
+      → approve_upgrade(proposal_id)                 ↓ UpgradeApprovedEvent
+  ... repeat until approvals ≥ threshold ...
+  any admin or Upgrader → execute_upgrade(proposal_id)
+      (after delay elapsed AND threshold met)        ↓ UpgradeProposalExecutedEvent
+```
+
+Only **one** proposal may be live at a time — cancel (admin-only, works even
+while paused) before proposing a replacement. Emitted events are
+`UpgradeProposedEvent` → `UpgradeApprovedEvent` (per approval) →
+`UpgradeProposalExecutedEvent` **or** `UpgradeProposalCancelledEvent`. The
+`UpgradedEvent` from the single-admin path is also published on execution, so
+existing indexers see the swap.
+
+**Auth matrix:**
+
+| Step | Admin | `Role::Upgrader` | Random |
+|------|-------|------------------|--------|
+| `set_upgrade_threshold` | ✅ | ❌ | ❌ |
+| `propose_multisig_upgrade` | ✅ | ✅ | ❌ |
+| `approve_upgrade` | ✅ | ✅ | ❌ |
+| `execute_upgrade` | ✅ | ✅ | ❌ |
+| `cancel_upgrade_proposal` | ✅ | ❌ | ❌ |
+
+**Operator flow** (threshold `2`, a 48 h delay, one admin + one Upgrader key):
+
+```bash
+# 1. Configure the threshold (admin only, once)
+stellar contract invoke --id "$CONTRACT_ID" --source-account admin --network "$NETWORK" --send=yes \
+  -- set_upgrade_threshold --caller "$ADMIN" --threshold 2
+
+# 2. Propose the upgrade (admin or Upgrader). wasm-hash is the hex SHA-256
+#    printed by `stellar contract install`; delay-secs is the governance window.
+HASH=$(stellar contract install --wasm target/wasm32v1-none/release/trustbridge_contract.wasm \
+  --source-account admin --network "$NETWORK")
+stellar contract invoke --id "$CONTRACT_ID" --source-account admin --network "$NETWORK" --send=yes \
+  -- propose_multisig_upgrade --caller "$ADMIN" --wasm-hash "$HASH" --delay-secs 172800
+
+# 3. A DIFFERENT admin/Upgrader key approves (proposal ids are 0-based; read
+#    the live proposal with `-- get_upgrade_proposal`).
+stellar contract invoke --id "$CONTRACT_ID" --source-account upgrader --network "$NETWORK" --send=yes \
+  -- approve_upgrade --caller "$UPGRADER" --proposal-id 0
+
+# 4. Only after the delay has elapsed and the threshold is met:
+stellar contract invoke --id "$CONTRACT_ID" --source-account upgrader --network "$NETWORK" --send=yes \
+  -- execute_upgrade --caller "$UPGRADER" --proposal-id 0
+
+# 5. Abort instead (admin only, any time before execution):
+stellar contract invoke --id "$CONTRACT_ID" --source-account admin --network "$NETWORK" --send=yes \
+  -- cancel_upgrade_proposal --caller "$ADMIN" --proposal-id 0
+```
+
+Gotchas:
+
+- `caller` must equal the signing identity, exactly as with `verify` /
+  `batch_remove` — pass `--caller` and sign with the same key.
+- **Simulate every step first** (`--send` omitted). `execute_upgrade` swaps real
+  contract WASM; a bad `--wasm-hash` bricks the contract until another
+  governance round can replace it.
+- If a staged WASM slot is set (`stage_wasm` / `get_staged`), the proposal hash
+  must match it or `execute_upgrade` fails with `StagedWasmMismatch`.
+- Execute fails with `UpgradeProposalDelayActive` while the delay is running and
+  `UpgradeProposalInsufficientApprovals` until the threshold is met — both are
+  transient, so retrying after more approvals / time is expected.
 
 ---
 
@@ -867,6 +946,10 @@ stellar contract invoke \
 
 Available even while paused, so a stuck or mistaken proposal is never
 trapped behind the same freeze that might be the reason to cancel it.
+
+The full threshold / propose / execute / cancel / pause / auth behaviour is
+covered by `tests/batch_remove_dual_control.rs`, which also asserts the
+`BatchRemoveProposed` / `BatchRemoveExecuted` / `BatchRemoveCancelled` events.
 
 ## Watchtower guardian (Issue #222)
 
