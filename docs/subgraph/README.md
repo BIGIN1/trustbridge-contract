@@ -1,4 +1,4 @@
-# TrustBridge Registry Subgraph (Issue #284)
+# TrustBridge Registry Subgraph (Issues #284, #386)
 
 The dashboard currently polls RPC directly. This directory is a **schema +
 mapping spec** so Wave UIs can query contributor history from a subgraph instead
@@ -6,8 +6,11 @@ of writing an indexer from scratch. Operating a hosted indexer is out of scope
 for this repo — [`scripts/event_indexer.sh`](../../scripts/event_indexer.sh)
 remains the runnable local reference.
 
-- [`schema.graphql`](schema.graphql) — entities for `RegisteredEvent`,
-  `VerifiedEvent`, `RemovedEvent`, plus a derived `Contributor` aggregate.
+- [`schema.graphql`](schema.graphql) — entities for every contributor-directed
+  contract event (`RegisteredEvent`, `VerifiedEvent`,
+  `VerificationRevokedEvent`, `RemovedEvent`, `RenamedEvent`, the challenge
+  lifecycle, and the address-rotation lifecycle), plus a derived `Contributor`
+  aggregate.
 
 ## Event → entity mapping
 
@@ -19,30 +22,66 @@ the contract does not emit.
 |---|---|---|---|
 | `RegisteredEvent` | `registered_event` | `github_username` (topic), `stellar_address`, `timestamp`, `sponsor: Option<Address>` | `RegisteredEvent` |
 | `VerifiedEvent` | `verified_event` | `github_username` (topic), `stellar_address`, `timestamp`, `domain` | `VerifiedEvent` |
+| `VerificationRevokedEvent` | `verification_revoked_event` | `github_username` (topic), `stellar_address`, `timestamp`, `reason_code`, `domain` | `VerificationRevokedEvent` |
 | `RemovedEvent` | `removed_event` | `github_username` (topic), `stellar_address`, `timestamp`, `domain` | `RemovedEvent` |
+| `RenamedEvent` | `renamed_event` | `old_username` (topic), `new_username` (topic), `stellar_address`, `verification_cleared`, `timestamp` | `RenamedEvent` |
+| `ChallengeStartedEvent` | `challenge_started_event` | `github_username` (topic), `challenged_by`, `resolve_after`, `timestamp`, `domain` | `ChallengeStartedEvent` |
+| `ChallengeCancelledEvent` | `challenge_cancelled_event` | `github_username` (topic), `cancelled_by`, `timestamp`, `domain` | `ChallengeCancelledEvent` |
+| `ChallengeCompletedEvent` | `challenge_completed_event` | `github_username` (topic), `completed_by`, `timestamp`, `domain` | `ChallengeCompletedEvent` |
+| `RotationRequestedEvent` | `rotation_requested_event` | `github_username` (topic), `current_address`, `new_address`, `executable_at`, `timestamp` | `RotationRequestedEvent` |
+| `RotationExecutedEvent` | `rotation_executed_event` | `github_username` (topic), `old_address`, `new_address`, `timestamp` | `RotationExecutedEvent` |
+| `RotationCancelledEvent` | `rotation_cancelled_event` | `github_username` (topic), `cancelled_by`, `timestamp` | `RotationCancelledEvent` |
 
 Notes and gotchas:
 
-- **`RegisteredEvent` has no `domain` field.** Only `VerifiedEvent` and
-  `RemovedEvent` carry `EventDomain` (Issue #226). The schema reflects this —
-  `RegisteredEvent.domain` does not exist. Take `contractId` / `networkId` for a
-  registration from the deployment the subgraph is pointed at.
+- **`domain` is not on every event.** Only `VerifiedEvent`, `RemovedEvent`,
+  `VerificationRevokedEvent`, and the three challenge events carry `EventDomain`
+  (Issue #226). `RegisteredEvent`, `RenamedEvent`, and the three rotation events
+  do **not** — the schema reflects this (no `domain` field there). Take
+  `contractId` / `networkId` for those from the deployment the subgraph is
+  pointed at.
 - **`EventDomain`** = `{ contract_id: Address, network_id: BytesN<32>,
   contract_version: (u32,u32,u32), domain_version: u32 }`. Mapped as an embedded
   type, not a queryable entity.
-- **`reason_code`** belongs to `VerificationRevokedEvent` and `PausedEvent`, not
-  to any of the three events modelled here. It is intentionally absent.
+- **`reason_code`** is a `u32` `RevokeReason` discriminant carried by
+  `VerificationRevokedEvent` (and by the unmodelled `PausedEvent` /
+  `UnpausedEvent`) — it lives on `VerificationRevokedEvent.reasonCode` here.
+- **`RenamedEvent` has two topic usernames.** `old_username` and `new_username`
+  are both topics; the entity keeps both as plain string fields. The `contributor`
+  relation points at **`old_username`** (the contributor being renamed); the
+  mapping must additionally migrate the `Contributor` aggregate from
+  `old_username` to `new_username` (create the new id, apply
+  `verification_cleared`, leave the old one with `removed = true`).
+- **Rotation events carry no `domain`** but do change the contributor: a
+  `RotationExecutedEvent` moves the aggregate's `stellarAddress` from
+  `old_address` to `new_address`.
+- **A completed challenge also emits a `RemovedEvent`** in the same transaction
+  (the squatted registration is deleted), so a `ChallengeCompletedEvent` and a
+  `RemovedEvent` for the same username arrive together.
 - **Batch removes**: `batch_remove` emits one `RemovedEvent` per removed
   contributor, all in one transaction. The entity `id` includes the per-tx
-  `eventIndex` so they do not collide.
+  `eventIndex` so they do not collide. The operational proposal events around
+  dual-control batches (`BatchRemoveProposedEvent`, `BatchRemoveExecutedEvent`,
+  `BatchRemoveCancelledEvent`) are **not** modelled — see scope below.
 - **Entity `id`** is the stable event id from
   [`DASHBOARD_SYNC.md`](../DASHBOARD_SYNC.md#stable-event-id-issue-283):
   `{networkId}:{contractId}:{ledgerSequence}:{txHash}:{eventIndex}`. Using it as
   the primary key makes ingestion replay-idempotent for free.
 - **`Contributor` aggregate** is last-write-wins keyed on `ledgerSequence`:
   a `RegisteredEvent` sets `stellarAddress` and clears `verified`; a
-  `VerifiedEvent` sets `verified = true`; a `RemovedEvent` sets `removed = true`
-  and `stellarAddress = null`. A later `RegisteredEvent` clears `removed`.
+  `VerifiedEvent` sets `verified = true`; a `VerificationRevokedEvent` sets
+  `verified = false`; a `RemovedEvent` sets `removed = true` and
+  `stellarAddress = null`; a later `RegisteredEvent` clears `removed`. A
+  `RotationExecutedEvent` updates `stellarAddress`; a `RenamedEvent` migrates
+  the aggregate to `new_username`. Challenge events change no aggregate fields —
+  they are recorded for history only.
+- **Scope: events without a contributor identity are not modelled.** Pause /
+  unpause, role grant / revoke / cancel / pending, guardian changes, WASM
+  upgrades / attestations / staging, and emergency pause events are telemetry
+  about the contract instance itself and name no contributor, so they have no
+  entity here and stay queryable only through the raw event log
+  (`scripts/event_indexer.sh`). The dashboard reconstructs contributor history
+  entirely from the modelled events.
 - Treat the subgraph as a change-notification cache. After any gap, reconcile
   against `get_public_paginated` on-chain — see `DASHBOARD_SYNC.md`.
 
@@ -65,8 +104,32 @@ export function handleRegistered(ev: RegisteredEvent): void {
 }
 ```
 
-`handleVerified` / `handleRemoved` are the same shape, reading `domain.*` from
-the payload and updating the `Contributor` `verified` / `removed` flags.
+`handleVerified` / `handleRemoved` / `handleVerificationRevoked` /
+`handleChallenge*` are the same shape, reading `domain.*` from the payload and
+updating the `Contributor` `verified` / `removed` flags.
+
+`handleRenamed` is the one handler that touches two `Contributor` ids — link
+the event to `old_username`, then migrate the aggregate:
+
+```ts
+export function handleRenamed(ev: RenamedEvent): void {
+  let e = new RenamedEventEntity(eventId(ev));
+  e.oldUsername = ev.params.old_username;
+  e.newUsername = ev.params.new_username;
+  e.stellarAddress = ev.params.stellar_address;
+  e.verificationCleared = ev.params.verification_cleared;
+  e.timestamp = ev.params.timestamp;
+  e.ledgerSequence = ev.ledger;
+  e.txHash = ev.transaction.hash;
+  e.contributor = ev.params.old_username;
+  e.save();
+  migrateContributor(ev.params.old_username, ev.params.new_username,
+    ev.params.verification_cleared); // set verified=false if cleared, else keep
+}
+```
+
+`handleRotationExecuted` is the same shape minus the dual-username handling and
+updates the aggregate's `stellarAddress` to `new_address`.
 
 ## Running locally
 
@@ -113,8 +176,19 @@ CONTRACT_ID=C... ONESHOT=1 ./scripts/event_indexer.sh
     timestamp
     domain { contractId networkId contractVersion }
   }
+  verificationRevokedEvents(where: { githubUsername: "octocat" }, orderBy: ledgerSequence) {
+    id
+    timestamp
+    reasonCode
+  }
   removedEvents(where: { githubUsername: "octocat" }, orderBy: ledgerSequence) {
     id
+    timestamp
+  }
+  renamedEvents(where: { oldUsername: "octocat" }, orderBy: ledgerSequence) {
+    id
+    newUsername
+    verificationCleared
     timestamp
   }
 }

@@ -1,8 +1,17 @@
 """
-TrustBridge registry subgraph schema (Issue #284).
+TrustBridge registry subgraph schema (Issues #284, #386).
 
-Covers the three events a dashboard needs to reconstruct contributor history
-without a bespoke indexer: RegisteredEvent, VerifiedEvent, RemovedEvent.
+Covers every contract event that names a contributor — `RegisteredEvent`,
+`VerifiedEvent`, `VerificationRevokedEvent`, `RemovedEvent`, `RenamedEvent`,
+and the challenge and address-rotation lifecycles — plus the derived
+`Contributor` aggregate, so a dashboard can reconstruct contributor history
+without a bespoke indexer. Operational events that do not name a contributor
+(pause/unpause, role grants, batch-remove proposals, guardian changes, WASM
+upgrades and attestations) are intentionally not modelled here: they are
+telemetry about the contract instance itself, not about a contributor, and
+remain queryable in the raw event log produced by
+[`scripts/event_indexer.sh`](../../scripts/event_indexer.sh).
+
 Field names and types mirror the on-chain `#[contractevent]` definitions in
 `src/events.rs` exactly — see docs/subgraph/README.md for the event -> entity
 mapping. No payload field here is invented; anything the contract does not emit
@@ -14,9 +23,11 @@ hosted indexer is out of scope for this repo.
 """
 
 """
-Deployment provenance carried by VerifiedEvent and RemovedEvent (`EventDomain`,
-Issue #226). RegisteredEvent does NOT carry this field — see README.
-Embedded, not a top-level entity: it has no identity of its own.
+Deployment provenance carried by `VerifiedEvent`, `RemovedEvent`,
+`VerificationRevokedEvent`, and the challenge events (`EventDomain`,
+Issue #226). `RegisteredEvent`, `RenamedEvent`, and the rotation events do NOT
+carry this field — see README. Embedded, not a top-level entity: it has no
+identity of its own.
 """
 type EventDomain {
   "Emitting contract instance (C... address)."
@@ -63,6 +74,26 @@ type VerifiedEvent @entity(immutable: true) {
 }
 
 """
+One `VerificationRevokedEvent`: an admin, Verifier, or Revoker cleared a
+contributor's verified status. Topic: `verification_revoked_event`.
+`github_username` is the event topic. `reason_code` is a numeric `RevokeReason`
+discriminant (see docs/ABI.md).
+"""
+type VerificationRevokedEvent @entity(immutable: true) {
+  "Stable event id (Issue #283)."
+  id: ID!
+  githubUsername: String!
+  stellarAddress: Bytes!
+  timestamp: BigInt!
+  "Numeric `RevokeReason` discriminant (1–6, 99)."
+  reasonCode: Int!
+  domain: EventDomain!
+  ledgerSequence: BigInt!
+  txHash: Bytes!
+  contributor: Contributor!
+}
+
+"""
 One `RemovedEvent`: a registration removed by the registrant or an admin.
 Topic: `removed_event`. `github_username` is the event topic. A large
 `batch_remove` emits one `RemovedEvent` per successfully removed contributor,
@@ -75,6 +106,134 @@ type RemovedEvent @entity(immutable: true) {
   stellarAddress: Bytes!
   timestamp: BigInt!
   domain: EventDomain!
+  ledgerSequence: BigInt!
+  txHash: Bytes!
+  contributor: Contributor!
+}
+
+"""
+One `RenamedEvent`: a registration's GitHub username was changed from
+`old_username` to `new_username`. Both usernames are event topics.
+`verification_cleared` reports whether the rename also cleared the
+contributor's verified status. Topic: `renamed_event`.
+"""
+type RenamedEvent @entity(immutable: true) {
+  "Stable event id (Issue #283)."
+  id: ID!
+  oldUsername: String!
+  newUsername: String!
+  stellarAddress: Bytes!
+  "Whether the verified flag was cleared by the rename."
+  verificationCleared: Boolean!
+  timestamp: BigInt!
+  ledgerSequence: BigInt!
+  txHash: Bytes!
+  "The contributor being renamed, keyed by `old_username` — see README."
+  contributor: Contributor!
+}
+
+"""
+One `ChallengeStartedEvent`: an admin opened a challenge on a squatted
+username (Issue #214). Topic: `challenge_started_event`. `github_username` is
+the event topic; `resolve_after` is the ledger timestamp after which the
+challenge may be completed.
+"""
+type ChallengeStartedEvent @entity(immutable: true) {
+  "Stable event id (Issue #283)."
+  id: ID!
+  githubUsername: String!
+  challengedBy: Bytes!
+  resolveAfter: BigInt!
+  timestamp: BigInt!
+  domain: EventDomain!
+  ledgerSequence: BigInt!
+  txHash: Bytes!
+  contributor: Contributor!
+}
+
+"""
+One `ChallengeCancelledEvent`: an admin cancelled a pending challenge
+(Issue #214). Topic: `challenge_cancelled_event`. `github_username` is the
+event topic.
+"""
+type ChallengeCancelledEvent @entity(immutable: true) {
+  "Stable event id (Issue #283)."
+  id: ID!
+  githubUsername: String!
+  cancelledBy: Bytes!
+  timestamp: BigInt!
+  domain: EventDomain!
+  ledgerSequence: BigInt!
+  txHash: Bytes!
+  contributor: Contributor!
+}
+
+"""
+One `ChallengeCompletedEvent`: an admin completed a challenge and the squatted
+registration was removed (Issue #214). Topic: `challenge_completed_event`.
+`github_username` is the event topic. A completed challenge also emits a
+`RemovedEvent` in the same transaction.
+"""
+type ChallengeCompletedEvent @entity(immutable: true) {
+  "Stable event id (Issue #283)."
+  id: ID!
+  githubUsername: String!
+  completedBy: Bytes!
+  timestamp: BigInt!
+  domain: EventDomain!
+  ledgerSequence: BigInt!
+  txHash: Bytes!
+  contributor: Contributor!
+}
+
+"""
+One `RotationRequestedEvent`: an address rotation for `github_username` was
+requested and is waiting out its delay (Issue #234). Topic:
+`rotation_requested_event`. `github_username` is the event topic;
+`executable_at` is the earliest ledger timestamp at which the rotation may be
+executed. Rotation events carry no `domain` field (see README).
+"""
+type RotationRequestedEvent @entity(immutable: true) {
+  "Stable event id (Issue #283)."
+  id: ID!
+  githubUsername: String!
+  currentAddress: Bytes!
+  newAddress: Bytes!
+  executableAt: BigInt!
+  timestamp: BigInt!
+  ledgerSequence: BigInt!
+  txHash: Bytes!
+  contributor: Contributor!
+}
+
+"""
+One `RotationExecutedEvent`: a pending address rotation was executed
+(Issue #234). Topic: `rotation_executed_event`. `github_username` is the event
+topic.
+"""
+type RotationExecutedEvent @entity(immutable: true) {
+  "Stable event id (Issue #283)."
+  id: ID!
+  githubUsername: String!
+  oldAddress: Bytes!
+  newAddress: Bytes!
+  timestamp: BigInt!
+  ledgerSequence: BigInt!
+  txHash: Bytes!
+  contributor: Contributor!
+}
+
+"""
+One `RotationCancelledEvent`: a pending address rotation was cancelled
+(Issue #234). Topic: `rotation_cancelled_event`. `github_username` is the
+event topic.
+"""
+type RotationCancelledEvent @entity(immutable: true) {
+  "Stable event id (Issue #283)."
+  id: ID!
+  githubUsername: String!
+  cancelledBy: Bytes!
+  timestamp: BigInt!
   ledgerSequence: BigInt!
   txHash: Bytes!
   contributor: Contributor!
@@ -100,5 +259,13 @@ type Contributor @entity {
   lastLedgerSequence: BigInt!
   registrations: [RegisteredEvent!]! @derivedFrom(field: "contributor")
   verifications: [VerifiedEvent!]! @derivedFrom(field: "contributor")
+  revocations: [VerificationRevokedEvent!]! @derivedFrom(field: "contributor")
   removals: [RemovedEvent!]! @derivedFrom(field: "contributor")
+  renames: [RenamedEvent!]! @derivedFrom(field: "contributor")
+  challengesStarted: [ChallengeStartedEvent!]! @derivedFrom(field: "contributor")
+  challengesCancelled: [ChallengeCancelledEvent!]! @derivedFrom(field: "contributor")
+  challengesCompleted: [ChallengeCompletedEvent!]! @derivedFrom(field: "contributor")
+  rotationsRequested: [RotationRequestedEvent!]! @derivedFrom(field: "contributor")
+  rotationsExecuted: [RotationExecutedEvent!]! @derivedFrom(field: "contributor")
+  rotationsCancelled: [RotationCancelledEvent!]! @derivedFrom(field: "contributor")
 }
