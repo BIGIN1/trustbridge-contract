@@ -17,6 +17,7 @@ pub use domain::{EventDomain, EVENT_DOMAIN_VERSION};
 pub use error::{ContractError, ErrorCategory};
 pub use events::{
     AttestationClearedEvent,
+    BotStatusChangedEvent,
     BatchRemoveCancelledEvent,
     BatchRemoveExecutedEvent,
     BatchRemoveProposedEvent,
@@ -2203,6 +2204,7 @@ impl TrustBridgeContract {
             stellar_address: stellar_address.clone(),
             timestamp,
             sponsor: None,
+            domain: event_domain(&env),
         }
         .publish(&env);
 
@@ -2295,6 +2297,7 @@ impl TrustBridgeContract {
             stellar_address: stellar_address.clone(),
             timestamp,
             sponsor: Some(sponsor.clone()),
+            domain: event_domain(&env),
         }
         .publish(&env);
 
@@ -3517,6 +3520,15 @@ impl TrustBridgeContract {
 
         record.is_bot = is_bot;
         set_record(&env, &github_username, &record);
+
+        BotStatusChangedEvent {
+            github_username: github_username.clone(),
+            is_bot,
+            actor: caller,
+            timestamp: env.ledger().timestamp(),
+            domain: event_domain(&env),
+        }
+        .publish(&env);
 
         Ok(())
     }
@@ -7579,6 +7591,7 @@ mod test {
             github_username: name.clone(),
             stellar_address: user.clone(),
             timestamp: 1_600_000_000,
+            sponsor: None,
             domain: env.as_contract(&contract_id, || event_domain(&env)),
         };
 
@@ -11274,6 +11287,40 @@ mod test {
                 TrustBridgeContract::get_address(env.clone(), username(&env, "octocat")).unwrap();
             assert!(record.is_bot);
         });
+    }
+
+    #[test]
+    fn test_set_bot_status_emits_event() {
+        let env = Env::default();
+        let (admin, user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        client.register(&name, &user, &Vec::new(&env));
+        client.set_bot_status(&admin, &name, &true);
+
+        let expected = BotStatusChangedEvent {
+            github_username: name.clone(),
+            is_bot: true,
+            actor: admin.clone(),
+            timestamp: 1_700_000_000,
+            domain: env.as_contract(&contract_id, || event_domain(&env)),
+        };
+        // `events().all()` only holds events from the last invocation.
+        assert_eq!(
+            env.events().all(),
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    expected.topics(&env),
+                    expected.data(&env),
+                )
+            ],
+            "BotStatusChangedEvent payload or topics changed"
+        );
     }
 
     #[test]

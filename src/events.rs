@@ -11,6 +11,24 @@ pub struct RegisteredEvent {
     pub stellar_address: Address,
     pub timestamp: u64,
     pub sponsor: Option<Address>,
+    /// Deployment that emitted this event — contract id, network, and
+    /// contract version. See [`EventDomain`] for why indexers need it.
+    pub domain: EventDomain,
+}
+
+/// Emitted when `set_bot_status` changes a record's `is_bot` flag (Issue #374).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BotStatusChangedEvent {
+    #[topic]
+    pub github_username: String,
+    pub is_bot: bool,
+    /// Admin or registrant that changed the flag.
+    pub actor: Address,
+    pub timestamp: u64,
+    /// Deployment that emitted this event — contract id, network, and
+    /// contract version. See [`EventDomain`] for why indexers need it.
+    pub domain: EventDomain,
 }
 
 /// Emitted when a registration is removed by the registrant or admin.

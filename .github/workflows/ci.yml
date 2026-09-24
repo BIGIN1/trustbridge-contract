@@ -8,19 +8,66 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  STELLAR_CLI_VERSION: 26.1.0
 
 jobs:
-  check:
-    name: Project check
+  quality:
+    name: Quality gate (fmt, clippy, test, docs)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify project layout
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: make fmt
+
+      - name: Clippy
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Rustdoc
+        run: make docs-check
+
+  build:
+    name: Contract build + WASM hash gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none, wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Stellar CLI
         run: |
-          test -f Cargo.toml
-          test -f rust-toolchain.toml
-          test -f src/lib.rs
-          test -f README.md
-          test -f Makefile
+          curl -sSL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C /usr/local/bin stellar
+          stellar --version
+
+      - name: Build WASM
+        run: make build
+
+      - name: WASM size budget
+        run: make wasm-size
+
+      - name: Compute and verify WASM hash pin
+        run: |
+          WASM=target/wasm32v1-none/release/trustbridge_contract.wasm
+          echo "### WASM SHA-256" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$(sha256sum "$WASM" | awk '{print $1}')\`" >> "$GITHUB_STEP_SUMMARY"
+          make wasm-hash-pin WASM_HASH_STRICT=1

@@ -35,7 +35,15 @@ cargo install --locked stellar-cli@26.1.0
 make check
 ```
 
-This runs formatting, clippy, tests, and contract build — the same checks as CI.
+This runs the same checks as the two jobs in `.github/workflows/ci.yml`:
+
+| CI job | Make targets |
+|---|---|
+| `quality` | `make fmt` (`cargo fmt --check`), `make lint` (`clippy -D warnings`), `make test`, `make docs-check` |
+| `build` | `make build` (`stellar contract build`), `make wasm-size`, `make wasm-hash-pin WASM_HASH_STRICT=1` |
+
+`make ci` runs the same set with the strict hash gate enabled, so it fails while
+`wasm-hash.pin` still contains `PLACEHOLDER` or does not match the built WASM.
 
 ### Codespaces / devcontainer setup
 

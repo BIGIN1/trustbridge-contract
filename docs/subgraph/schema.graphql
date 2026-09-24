@@ -14,8 +14,8 @@ hosted indexer is out of scope for this repo.
 """
 
 """
-Deployment provenance carried by VerifiedEvent and RemovedEvent (`EventDomain`,
-Issue #226). RegisteredEvent does NOT carry this field — see README.
+Deployment provenance carried by RegisteredEvent (Issue #373), VerifiedEvent and
+RemovedEvent (`EventDomain`, Issue #226).
 Embedded, not a top-level entity: it has no identity of its own.
 """
 type EventDomain {
@@ -41,6 +41,8 @@ type RegisteredEvent @entity(immutable: true) {
   stellarAddress: Bytes!
   timestamp: BigInt!
   sponsor: Bytes
+  "Null only for registrations emitted before 1.1.0 (Issue #373)."
+  domain: EventDomain
   ledgerSequence: BigInt!
   txHash: Bytes!
   contributor: Contributor!

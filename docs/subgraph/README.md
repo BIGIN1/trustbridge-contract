@@ -17,16 +17,16 @@ the contract does not emit.
 
 | Contract event | Topic symbol | Payload fields (from `src/events.rs`) | Entity |
 |---|---|---|---|
-| `RegisteredEvent` | `registered_event` | `github_username` (topic), `stellar_address`, `timestamp`, `sponsor: Option<Address>` | `RegisteredEvent` |
+| `RegisteredEvent` | `registered_event` | `github_username` (topic), `stellar_address`, `timestamp`, `sponsor: Option<Address>`, `domain` | `RegisteredEvent` |
 | `VerifiedEvent` | `verified_event` | `github_username` (topic), `stellar_address`, `timestamp`, `domain` | `VerifiedEvent` |
 | `RemovedEvent` | `removed_event` | `github_username` (topic), `stellar_address`, `timestamp`, `domain` | `RemovedEvent` |
 
 Notes and gotchas:
 
-- **`RegisteredEvent` has no `domain` field.** Only `VerifiedEvent` and
-  `RemovedEvent` carry `EventDomain` (Issue #226). The schema reflects this —
-  `RegisteredEvent.domain` does not exist. Take `contractId` / `networkId` for a
-  registration from the deployment the subgraph is pointed at.
+- **All three events carry `domain`.** `RegisteredEvent` gained `EventDomain`
+  in 1.1.0 (Issue #373), matching `VerifiedEvent` and `RemovedEvent` (Issue
+  #226). Registrations emitted by pre-1.1.0 WASM have no `domain`; fall back to
+  the deployment the subgraph is pointed at for those.
 - **`EventDomain`** = `{ contract_id: Address, network_id: BytesN<32>,
   contract_version: (u32,u32,u32), domain_version: u32 }`. Mapped as an embedded
   type, not a queryable entity.
