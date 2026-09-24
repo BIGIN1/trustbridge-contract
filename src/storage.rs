@@ -2557,3 +2557,59 @@ mod storage_dead_code_tests {
         });
     }
 }
+
+/// Report returned by `repair_index` (Issue #368).
+///
+/// Contains the stored counter values before any correction and the values
+/// recomputed by walking the index, so an operator can review the discrepancy
+/// before calling again with `apply = true`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[soroban_sdk::contracttype]
+pub struct RepairReport {
+    /// Value of `count` as read from instance storage.
+    pub stored_total: u32,
+    /// Value recomputed by counting every username in the index that has a
+    /// stored record.
+    pub recomputed_total: u32,
+    /// Value of `verified` as read from instance storage.
+    pub stored_verified: u32,
+    /// Value recomputed by counting every record whose `verified` flag is
+    /// `true`.
+    pub recomputed_verified: u32,
+    /// `true` when either counter differed from its recomputed value.
+    /// When `false`, `apply = true` is a no-op.
+    pub drifted: bool,
+}
+
+/// Recomputes `count` and `verified` by walking the chunked username index and
+/// checking each stored record (Issue #368).
+///
+/// Pass `apply = false` for a dry run — nothing is written. Pass `apply = true`
+/// to correct any drift found; a call that finds no drift never writes.
+pub fn repair_index(env: &Env, apply: bool) -> RepairReport {
+    let index = get_index(env);
+    let mut recomputed_total: u32 = 0;
+    let mut recomputed_verified: u32 = 0;
+    for username in index.iter() {
+        if let Some(record) = get_record(env, &username) {
+            recomputed_total = recomputed_total.saturating_add(1);
+            if record.verified {
+                recomputed_verified = recomputed_verified.saturating_add(1);
+            }
+        }
+    }
+    let stored_total = get_count(env);
+    let stored_verified = get_verified_count(env);
+    let drifted = stored_total != recomputed_total || stored_verified != recomputed_verified;
+    if apply && drifted {
+        set_count(env, recomputed_total);
+        set_verified_count(env, recomputed_verified);
+    }
+    RepairReport {
+        stored_total,
+        recomputed_total,
+        stored_verified,
+        recomputed_verified,
+        drifted,
+    }
+}

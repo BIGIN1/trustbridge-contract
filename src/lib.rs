@@ -58,8 +58,9 @@ pub use oracle_proof::{
 };
 pub use staged_wasm::StagedWasm;
 pub use storage::{
-    ChallengeRecord, ContributorRecord, ExportPage, HealthSnapshot, PauseReason, PendingRoleGrant,
-    Role, Stats, VerificationConfig, VerifierAllowEntry, WasmAttestation, WasmProvenance,
+    ChallengeRecord, ContributorRecord, ExportAttestation, ExportPage, HealthSnapshot, PauseReason,
+    PendingBatchRemove, PendingRoleGrant, PendingRotation, RecordProof, RepairReport, Role,
+    RoleHolder, Stats, VerificationConfig, VerifierAllowEntry, WasmAttestation, WasmProvenance,
     MAX_VERIFIERS,
 };
 pub use storage::{ContributorRecord, EntityType, Stats};
@@ -12393,5 +12394,157 @@ mod test {
                 "last_event_ledger must be monotonically non-decreasing ({second} < {first})"
             );
         });
+    }
+
+    // ── Issue #368: exported type reference tests ─────────────────────────────
+
+    #[test]
+    fn test_pending_rotation_type_is_exported() {
+        let env = Env::default();
+        let (admin, user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
+
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+        let new_addr = soroban_sdk::Address::generate(&env);
+        client.request_address_rotation(&user, &name, &new_addr);
+
+        let pending: Option<PendingRotation> = client.get_pending_rotation(&name);
+        let p = pending.expect("rotation should be pending");
+        assert_eq!(p.new_address, new_addr);
+        assert!(p.executable_at >= p.requested_at);
+    }
+
+    #[test]
+    fn test_pending_batch_remove_type_is_exported() {
+        let env = Env::default();
+        let (admin, user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
+
+        // Enable dual-control by setting threshold to 1.
+        env.mock_all_auths();
+        client.set_batch_remove_threshold(&1u32);
+
+        let usernames = soroban_sdk::vec![&env, name.clone()];
+        env.mock_all_auths();
+        client.propose_batch_remove(&admin, &usernames);
+
+        let pending: Option<PendingBatchRemove> = client.get_pending_batch_remove();
+        let p = pending.expect("batch remove should be pending");
+        assert_eq!(p.proposed_by, admin);
+        assert_eq!(p.usernames.len(), 1);
+    }
+
+    #[test]
+    fn test_export_attestation_type_is_exported() {
+        let env = Env::default();
+        let (admin, user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
+
+        env.mock_all_auths();
+        let attest: ExportAttestation = client
+            .export_attestation(&0u32, &10u32)
+            .expect("export_attestation should succeed");
+        assert_eq!(attest.ledger, env.ledger().sequence());
+        assert_eq!(attest.version.len(), 3);
+    }
+
+    #[test]
+    fn test_record_proof_type_is_exported() {
+        let env = Env::default();
+        let (_admin, user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
+
+        let proof: RecordProof = client.get_record_proof(&name);
+        assert!(proof.exists);
+        assert!(!proof.verified);
+        assert!(proof.as_of_ledger > 0 || proof.registered_at == 0 || proof.exists);
+    }
+
+    #[test]
+    fn test_role_holder_type_is_exported() {
+        let env = Env::default();
+        let (admin, _user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+
+        // initialize grants Role::Admin to admin via the role index.
+        let holders: soroban_sdk::Vec<RoleHolder> = client.get_role_holders(&0u32, &10u32);
+        assert!(holders.len() >= 1);
+        assert_eq!(holders.get(0).unwrap().address, admin);
+    }
+
+    #[test]
+    fn test_repair_report_no_drift_after_clean_operations() {
+        let env = Env::default();
+        let (admin, user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
+
+        env.mock_all_auths();
+        let report: RepairReport = client
+            .repair_index(&false)
+            .expect("repair_index should succeed");
+        assert!(!report.drifted, "counters must not drift after normal register");
+        assert_eq!(report.stored_total, report.recomputed_total);
+        assert_eq!(report.stored_verified, report.recomputed_verified);
     }
 }
