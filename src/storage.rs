@@ -108,7 +108,7 @@ pub const LAST_ACT_KEY: Symbol = symbol_short!("lastact");
 ///
 /// This instance value is updated as part of the same invocation that publishes
 /// an event. `0` means the deployed instance has not emitted an event yet.
-pub const LAST_EVENT_LEDGER_KEY: Symbol = symbol_short!("evt_ledger");
+pub const LAST_EVENT_LEDGER_KEY: Symbol = symbol_short!("evtledger");
 /// Key for the WASM provenance record (Wave #24).
 pub const PROV_KEY: Symbol = symbol_short!("prov");
 /// Key for the pending upgrade attestation (Wave #24).
