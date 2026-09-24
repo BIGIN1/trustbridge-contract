@@ -12394,4 +12394,183 @@ mod test {
             );
         });
     }
+
+    // ── Issue #300: WasmStagedEvent / StagedWasmClearedEvent shapes ──────────
+
+    #[test]
+    fn test_wasm_staged_event_shape() {
+        let env = Env::default();
+        let (admin, _user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+
+        let hash = soroban_sdk::BytesN::from_array(&env, &[0xABu8; 32]);
+        env.mock_all_auths();
+        env.ledger().set_timestamp(2_000_000_000);
+        client.stage_wasm(&admin, &hash);
+
+        let expected = crate::events::WasmStagedEvent {
+            wasm_hash: hash.clone(),
+            staged_by: admin.clone(),
+            timestamp: 2_000_000_000,
+        };
+
+        assert_eq!(
+            env.events().all(),
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    expected.topics(&env),
+                    expected.data(&env),
+                )
+            ],
+            "WasmStagedEvent payload or topics changed"
+        );
+
+        let topics = expected.topics(&env);
+        assert_eq!(topics.len(), 2, "WasmStagedEvent must have 2 topics");
+        assert_eq!(
+            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+            soroban_sdk::Symbol::new(&env, "wasm_staged_event"),
+            "WasmStagedEvent topic symbol changed"
+        );
+        assert_eq!(
+            soroban_sdk::BytesN::<32>::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
+            hash,
+            "WasmStagedEvent wasm_hash topic changed"
+        );
+    }
+
+    #[test]
+    fn test_staged_wasm_cleared_event_shape() {
+        let env = Env::default();
+        let (admin, _user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+
+        let hash = soroban_sdk::BytesN::from_array(&env, &[0xCDu8; 32]);
+        env.mock_all_auths();
+        env.ledger().set_timestamp(2_100_000_000);
+        client.stage_wasm(&admin, &hash);
+
+        env.ledger().set_timestamp(2_200_000_000);
+        client.clear_staged(&admin);
+
+        let expected = crate::events::StagedWasmClearedEvent {
+            wasm_hash: hash.clone(),
+            cleared_by: admin.clone(),
+            timestamp: 2_200_000_000,
+        };
+
+        assert_eq!(
+            env.events().all(),
+            soroban_sdk::vec![
+                &env,
+                (
+                    contract_id.clone(),
+                    expected.topics(&env),
+                    expected.data(&env),
+                )
+            ],
+            "StagedWasmClearedEvent payload or topics changed"
+        );
+
+        let topics = expected.topics(&env);
+        assert_eq!(topics.len(), 2, "StagedWasmClearedEvent must have 2 topics");
+        assert_eq!(
+            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+            soroban_sdk::Symbol::new(&env, "staged_wasm_cleared_event"),
+            "StagedWasmClearedEvent topic symbol changed"
+        );
+    }
+
+    // ── Issue #301: multisig upgrade event shapes ─────────────────────────────
+
+    #[test]
+    fn test_upgrade_proposed_event_shape() {
+        let env = Env::default();
+        let (admin, _user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+
+        let hash = soroban_sdk::BytesN::from_array(&env, &[0x01u8; 32]);
+        env.mock_all_auths();
+        env.ledger().set_timestamp(3_000_000_000);
+        client.propose_multisig_upgrade(&admin, &hash, &0u64);
+
+        let events = env.events().all();
+        assert_eq!(events.len(), 1, "propose_multisig_upgrade must emit exactly one event");
+
+        let (_, topics, _) = events.get(0).unwrap();
+        assert_eq!(
+            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+            soroban_sdk::Symbol::new(&env, "upgrade_proposed_event"),
+            "UpgradeProposedEvent topic symbol changed"
+        );
+        assert_eq!(
+            u32::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
+            0u32,
+            "UpgradeProposedEvent proposal_id topic changed"
+        );
+    }
+
+    #[test]
+    fn test_upgrade_approved_event_shape() {
+        let env = Env::default();
+        let (admin, _user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+
+        let hash = soroban_sdk::BytesN::from_array(&env, &[0x02u8; 32]);
+        env.mock_all_auths();
+        env.ledger().set_timestamp(3_100_000_000);
+        client.propose_multisig_upgrade(&admin, &hash, &0u64);
+
+        client.set_upgrade_threshold(&admin, &2u32);
+
+        let signer2 = soroban_sdk::Address::generate(&env);
+        env.mock_all_auths();
+        client.set_role(&signer2, &crate::storage::Role::Upgrader);
+        client.approve_upgrade(&signer2, &0u32);
+
+        let events = env.events().all();
+        assert_eq!(events.len(), 1, "approve_upgrade must emit exactly one event");
+
+        let (_, topics, _) = events.get(0).unwrap();
+        assert_eq!(
+            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+            soroban_sdk::Symbol::new(&env, "upgrade_approved_event"),
+            "UpgradeApprovedEvent topic symbol changed"
+        );
+        assert_eq!(
+            u32::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
+            0u32,
+            "UpgradeApprovedEvent proposal_id topic changed"
+        );
+    }
+
+    #[test]
+    fn test_upgrade_proposal_cancelled_event_shape() {
+        let env = Env::default();
+        let (admin, _user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+
+        let hash = soroban_sdk::BytesN::from_array(&env, &[0x03u8; 32]);
+        env.mock_all_auths();
+        env.ledger().set_timestamp(3_200_000_000);
+        client.propose_multisig_upgrade(&admin, &hash, &3600u64);
+        client.cancel_upgrade_proposal(&admin, &0u32);
+
+        let events = env.events().all();
+        assert_eq!(events.len(), 1, "cancel_upgrade_proposal must emit exactly one event");
+
+        let (_, topics, _) = events.get(0).unwrap();
+        assert_eq!(
+            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+            soroban_sdk::Symbol::new(&env, "upgrade_proposal_cancelled_event"),
+            "UpgradeProposalCancelledEvent topic symbol changed"
+        );
+        assert_eq!(
+            u32::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
+            0u32,
+            "UpgradeProposalCancelledEvent proposal_id topic changed"
+        );
+    }
 }

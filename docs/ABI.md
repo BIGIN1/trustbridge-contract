@@ -1756,6 +1756,98 @@ this event `ADMIN_KEY` points at `new_admin`.
 
 ---
 
+### WasmStagedEvent (Issue #300)
+
+```
+topics: ["wasm_staged_event", wasm_hash]
+data:   { staged_by, timestamp }
+```
+
+Emitted when an admin or Upgrader stages a WASM hash ahead of an upgrade via
+`stage_wasm`. `wasm_hash` is a topic so indexers can filter for a specific
+hash. The slot is advisory — `upgrade` will reject a hash that differs from the
+staged one, but will proceed if nothing is staged.
+
+| Test | What it checks |
+|------|----------------|
+| `test_wasm_staged_event_shape` | Full event list matches: topic symbol `"wasm_staged_event"`, `wasm_hash` topic, `staged_by` and `timestamp` in data |
+
+### StagedWasmClearedEvent (Issue #300)
+
+```
+topics: ["staged_wasm_cleared_event", wasm_hash]
+data:   { cleared_by, timestamp }
+```
+
+Emitted when the staged WASM slot is cleared via `clear_staged` before the
+upgrade is executed. Only emitted when something was actually staged; a no-op
+clear produces no event.
+
+| Test | What it checks |
+|------|----------------|
+| `test_staged_wasm_cleared_event_shape` | Full event list matches: topic symbol, `wasm_hash` topic, `cleared_by` and `timestamp` in data |
+
+---
+
+### UpgradeProposedEvent (Issue #301)
+
+```
+topics: ["upgrade_proposed_event", proposal_id]
+data:   { wasm_hash, proposed_by, executable_at, timestamp }
+```
+
+Emitted when `propose_multisig_upgrade` creates a new upgrade proposal.
+`proposal_id` is the monotonic `u32` counter assigned to this proposal.
+`executable_at` is the earliest ledger timestamp at which `execute_upgrade`
+may succeed (= `timestamp + delay_secs`).
+
+| Test | What it checks |
+|------|----------------|
+| `test_upgrade_proposed_event_shape` | One event emitted; topic symbol `"upgrade_proposed_event"`; `proposal_id` topic is `0` for the first proposal |
+
+### UpgradeApprovedEvent (Issue #301)
+
+```
+topics: ["upgrade_approved_event", proposal_id]
+data:   { approved_by, approval_count, timestamp }
+```
+
+Emitted each time an eligible signer calls `approve_upgrade`. `approval_count`
+is the running total of distinct approvals after this one is recorded.
+Subscribers can watch `approval_count` to know when the threshold will be met
+without reading contract state.
+
+| Test | What it checks |
+|------|----------------|
+| `test_upgrade_approved_event_shape` | One event emitted; topic symbol `"upgrade_approved_event"`; `proposal_id` topic matches |
+
+### UpgradeProposalExecutedEvent (Issue #301)
+
+```
+topics: ["upgrade_proposal_executed_event", proposal_id]
+data:   { wasm_hash, executed_by, approval_count, timestamp }
+```
+
+Emitted when `execute_upgrade` successfully swaps the contract WASM. Always
+followed immediately by `UpgradedEvent` in the same invocation. `approval_count`
+is the total number of distinct approvals the proposal accumulated.
+
+### UpgradeProposalCancelledEvent (Issue #301)
+
+```
+topics: ["upgrade_proposal_cancelled_event", proposal_id]
+data:   { wasm_hash, cancelled_by, timestamp }
+```
+
+Emitted when the admin discards a live proposal via `cancel_upgrade_proposal`
+before execution.
+
+| Test | What it checks |
+|------|----------------|
+| `test_upgrade_proposal_cancelled_event_shape` | One event emitted; topic symbol `"upgrade_proposal_cancelled_event"`; `proposal_id` topic matches |
+
+---
+
 ### `version() -> (u32, u32, u32)`
 
 Returns the deployed contract version as `(major, minor, patch)`.

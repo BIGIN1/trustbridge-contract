@@ -376,3 +376,76 @@ pub struct GuardianChangedEvent {
     pub admin: Address,
     pub timestamp: u64,
 }
+
+/// Emitted when a WASM hash is staged ahead of an upgrade (Issue #300).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WasmStagedEvent {
+    #[topic]
+    pub wasm_hash: BytesN<32>,
+    pub staged_by: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a staged WASM slot is cleared before the upgrade is executed
+/// (Issue #300).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StagedWasmClearedEvent {
+    #[topic]
+    pub wasm_hash: BytesN<32>,
+    pub cleared_by: Address,
+    pub timestamp: u64,
+}
+
+/// Emitted when a multisig upgrade proposal is created (Issue #301).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposedEvent {
+    #[topic]
+    pub proposal_id: u32,
+    pub wasm_hash: BytesN<32>,
+    pub proposed_by: Address,
+    /// Earliest ledger timestamp at which `execute_upgrade` may succeed.
+    pub executable_at: u64,
+    pub timestamp: u64,
+}
+
+/// Emitted when an eligible signer adds their approval to a live upgrade
+/// proposal (Issue #301).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeApprovedEvent {
+    #[topic]
+    pub proposal_id: u32,
+    pub approved_by: Address,
+    /// Total number of distinct approvals recorded after this one.
+    pub approval_count: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when a live upgrade proposal is executed after the delay has elapsed
+/// and the approval threshold has been met (Issue #301).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposalExecutedEvent {
+    #[topic]
+    pub proposal_id: u32,
+    pub wasm_hash: BytesN<32>,
+    pub executed_by: Address,
+    /// Total number of distinct approvals the proposal accumulated.
+    pub approval_count: u32,
+    pub timestamp: u64,
+}
+
+/// Emitted when a live upgrade proposal is cancelled before execution
+/// (Issue #301).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpgradeProposalCancelledEvent {
+    #[topic]
+    pub proposal_id: u32,
+    pub wasm_hash: BytesN<32>,
+    pub cancelled_by: Address,
+    pub timestamp: u64,
+}
