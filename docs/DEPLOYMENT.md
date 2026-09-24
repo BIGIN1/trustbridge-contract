@@ -729,8 +729,12 @@ If intentional feature growth pushes the binary past 200 KB:
 | `sbom_hash` | SHA-256 of the SBOM generated for this build |
 | `source_hash` | SHA-256 of the source tree the WASM was built from |
 
-Both are `Option<BytesN<32>>`. `upgrade` writes them as `None` — the chain cannot
-know them — and the operator backfills them right after the upgrade:
+Both are `Option<BytesN<32>>`. **Every** provenance write path sets them
+explicitly as `None` — the single-admin `upgrade` and the multisig
+`execute_upgrade_proposal` alike (Issue #400; the multisig path previously
+omitted the fields entirely, which did not default them, it failed to compile).
+The chain cannot know either digest at upgrade time, so the operator backfills
+them right after the upgrade:
 
 ```bash
 stellar contract invoke \
@@ -740,6 +744,9 @@ stellar contract invoke \
 
 Passing `None` for either argument leaves the stored value untouched, so the two
 can be filled in independently.
+
+Both upgrade paths behave identically here, so a multisig-executed upgrade needs
+the same `set_provenance_digests` follow-up as an admin-executed one.
 
 **Migration.** Provenance records written before these fields existed decode with
 both digests absent, which reads as "not recorded" rather than "verified empty".

@@ -186,6 +186,106 @@ rpc_get_events() {
     -H 'Content-Type: application/json' -d "$req"
 }
 
+# --- topic classification (Issue #399) -------------------------------------
+#
+# The indexer used to write `topic` through as an opaque base64 array, which is
+# unusable for dashboard work: every stream looked identical and a consumer had
+# to decode XDR itself to tell a `register` from an `upgrade`.
+#
+# `#[contractevent]` in src/events.rs derives the first topic as the struct
+# name in snake_case — `RegisteredEvent` becomes `registered_event`. This table
+# maps those symbols to a stable `event_kind` plus a coarse `category` that the
+# dashboard can group on. It is table-driven on purpose: adding an event to
+# src/events.rs means adding one row here, and scripts/check_event_topics.sh
+# fails CI if the two fall out of step.
+#
+# Format: <topic_symbol>|<event_kind>|<category>
+#
+# Categories:
+#   registry   — a registration's lifecycle (register / remove / rename)
+#   attest     — verification state (verify / revoke / configure)
+#   challenge  — username challenge flow
+#   role       — role grants, revocations, and their timelocks
+#   admin      — pause, guardian, rotation, verifier allowlist
+#   upgrade    — WASM upgrade, attestation, staged provenance
+#   batch      — batch proposals and their execution
+TOPIC_TABLE="$(cat <<'TOPICS'
+registered_event|registered|registry
+removed_event|removed|registry
+renamed_event|renamed|registry
+verified_event|verified|attest
+verification_revoked_event|verification_revoked|attest
+verification_configured_event|verification_configured|attest
+challenge_started_event|challenge_started|challenge
+challenge_cancelled_event|challenge_cancelled|challenge
+challenge_completed_event|challenge_completed|challenge
+role_granted_event|role_granted|role
+role_revoked_event|role_revoked|role
+role_grant_pending_event|role_grant_pending|role
+role_grant_cancelled_event|role_grant_cancelled|role
+paused_event|paused|admin
+unpaused_event|unpaused|admin
+emergency_paused_event|emergency_paused|admin
+emergency_cleared_event|emergency_cleared|admin
+guardian_changed_event|guardian_changed|admin
+rotation_requested_event|rotation_requested|admin
+rotation_executed_event|rotation_executed|admin
+rotation_cancelled_event|rotation_cancelled|admin
+upgraded_event|upgraded|upgrade
+upgrade_attested_event|upgrade_attested|upgrade
+attestation_cleared_event|attestation_cleared|upgrade
+batch_remove_proposed_event|batch_remove_proposed|batch
+batch_remove_executed_event|batch_remove_executed|batch
+batch_remove_cancelled_event|batch_remove_cancelled|batch
+TOPICS
+)"
+
+# Decodes a base64 ScVal that holds a Symbol, echoing the symbol text.
+#
+# A full XDR decoder is out of scope for a dependency-light reference script.
+# An ScVal symbol is a 4-byte discriminant, a 4-byte length, then the ASCII
+# bytes — so pulling the longest run of symbol-legal characters out of the
+# decoded blob recovers the name reliably for the symbols this contract emits.
+# Anything that does not decode cleanly yields an empty string, and the caller
+# labels the event `unknown` rather than guessing.
+decode_topic_symbol() {
+  local b64="${1:-}"
+  [[ -z "$b64" || "$b64" == "null" ]] && { echo ""; return; }
+
+  local decoded
+  decoded="$(printf '%s' "$b64" | base64 -d 2>/dev/null | tr -c 'a-zA-Z0-9_' '\n' | awk '
+    length($0) > length(best) { best = $0 }
+    END { print best }
+  ')" || decoded=""
+
+  # A Symbol is at most 32 chars; anything longer is not one of ours.
+  if (( ${#decoded} > 32 )); then
+    echo ""
+  else
+    echo "$decoded"
+  fi
+}
+
+# Looks a topic symbol up in TOPIC_TABLE.
+# Echoes "<event_kind>\t<category>", falling back to "unknown\tunclassified".
+classify_topic() {
+  local symbol="${1:-}"
+  [[ -z "$symbol" ]] && { printf 'unknown\tunclassified\n'; return; }
+
+  local row
+  row="$(grep -m1 "^${symbol}|" <<<"$TOPIC_TABLE" || true)"
+  if [[ -z "$row" ]]; then
+    # Deliberately not an error: an indexer pointed at a newer contract must
+    # keep recording events it does not recognise, or the operator loses the
+    # stream entirely at the moment they most need it. The `unknown` label is
+    # the signal to update the table.
+    printf 'unknown\tunclassified\n'
+    return
+  fi
+
+  printf '%s\t%s\n' "$(cut -d'|' -f2 <<<"$row")" "$(cut -d'|' -f3 <<<"$row")"
+}
+
 # --- event processing ----------------------------------------------------
 
 # Reads a JSON-RPC response on stdin, appends new events to EVENTS_FILE,
@@ -218,10 +318,22 @@ process_response() {
       continue   # reorg / overlap re-read → already logged, skip
     fi
 
+    # Classify the event from its first topic (Issue #399) so a dashboard can
+    # filter on `event_kind` without decoding XDR itself.
+    local topic0 topic_symbol classified event_kind category
+    topic0="$(jq -r '(.topic // .topics // [])[0] // ""' <<<"$ev")"
+    topic_symbol="$(decode_topic_symbol "$topic0")"
+    classified="$(classify_topic "$topic_symbol")"
+    event_kind="$(cut -f1 <<<"$classified")"
+    category="$(cut -f2 <<<"$classified")"
+
     # Normalize into the shape DASHBOARD_SYNC.md keys idempotency on:
     # (ledger_sequence, tx_hash) plus the topic symbol.
     jq -c \
       --arg indexed_at "$(now_iso)" \
+      --arg topic_symbol "$topic_symbol" \
+      --arg event_kind "$event_kind" \
+      --arg category "$category" \
       '{
         id: .id,
         ledger_sequence: (.ledger // .inSuccessfulContractCall // 0),
@@ -230,6 +342,9 @@ process_response() {
         tx_hash: (.txHash // .transactionHash // null),
         type: .type,
         topic: (.topic // .topics),
+        topic_symbol: (if $topic_symbol == "" then null else $topic_symbol end),
+        event_kind: $event_kind,
+        category: $category,
         value: .value,
         in_successful_contract_call: (.inSuccessfulContractCall // true),
         indexed_at: $indexed_at

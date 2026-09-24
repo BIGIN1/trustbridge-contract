@@ -8,7 +8,9 @@ out of the repo, and default to **testnet** (never mainnet).
 |---|---|
 | `deploy.sh` | Build + deploy + `initialize` a fresh instance. |
 | `demo_e2e.sh` | One-shot happy path: register → verify → lookup → export. |
-| `event_indexer.sh` | **Reference event indexer** — tails contract events into local JSONL with an on-disk resume cursor (Issue #288). See below. |
+| `event_indexer.sh` | **Reference event indexer** — tails contract events into local JSONL with an on-disk resume cursor (Issue #288) and classifies topic symbols (Issue #399). See below. |
+| `check_event_topics.sh` | Fails if the indexer's topic table drifts from `src/events.rs`, and asserts replay idempotency (Issue #399). |
+| `check_error_codes.sh` | Fails if `ContractError` discriminants disagree across the enum, `from_code`, the golden file, and `docs/ABI.md` (Issue #402). |
 | `export_registry.sh` | Page the admin export into a single registry JSON snapshot. |
 | `validate_registry.sh` | Diff an export JSON against live on-chain state. |
 | `ttl_keeper.sh` | Walk the index and bump persistent-entry TTLs. |
@@ -63,16 +65,51 @@ MOCK_RESPONSE=./scripts/testdata/getEvents.sample.json \
   CONTRACT_ID=C_MOCK ONESHOT=1 ./scripts/event_indexer.sh
 ```
 
+### Topic classification (Issue #399)
+
+Each indexed event carries three extra fields so a dashboard can filter without
+decoding XDR itself:
+
+| Field | Meaning |
+|-------|---------|
+| `topic_symbol` | The decoded first topic, e.g. `registered_event`. `null` if it could not be decoded. |
+| `event_kind` | Stable short name, e.g. `registered`. `unknown` for an unrecognised topic. |
+| `category` | Coarse grouping: `registry`, `attest`, `challenge`, `role`, `admin`, `upgrade`, `batch`. |
+
+`#[contractevent]` derives the first topic from the struct name in snake_case,
+so `RegisteredEvent` in `src/events.rs` emits topic `registered_event`. The
+mapping lives in `TOPIC_TABLE` near the top of `event_indexer.sh`; adding an
+event means adding one row.
+
+An unrecognised topic is labelled `unknown` and **still written**. An indexer
+pointed at a newer contract must keep recording events it does not recognise —
+dropping the stream at the moment an operator most needs it would be the worse
+failure. `unknown` rows are the signal to update the table.
+
+`scripts/check_event_topics.sh` fails CI when `TOPIC_TABLE` and
+`src/events.rs` fall out of step, and re-runs the indexer over the sample to
+assert resume idempotency.
+
+```bash
+./scripts/check_event_topics.sh
+```
+
 ### Verify resume behavior locally
 
 ```bash
 rm -rf .indexer
 MOCK_RESPONSE=./scripts/testdata/getEvents.sample.json CONTRACT_ID=C_MOCK ONESHOT=1 ./scripts/event_indexer.sh
-wc -l .indexer/events-testnet.jsonl          # => 2
+wc -l .indexer/events-testnet.jsonl          # => 10
 # Run it again — the cursor on disk is replayed, nothing is double-written:
 MOCK_RESPONSE=./scripts/testdata/getEvents.sample.json CONTRACT_ID=C_MOCK ONESHOT=1 ./scripts/event_indexer.sh
-wc -l .indexer/events-testnet.jsonl          # => still 2
+wc -l .indexer/events-testnet.jsonl          # => still 10
+
+# What was classified:
+jq -r '[.event_kind, .category] | @tsv' .indexer/events-testnet.jsonl
 ```
+
+The sample covers one event from each category plus a deliberately unknown
+topic, so the `unknown` fallback is exercised rather than assumed.
 
 ### Environment variables
 

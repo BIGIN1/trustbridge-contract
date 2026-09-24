@@ -9,6 +9,13 @@ use soroban_sdk::contracterror;
 /// errors must append after the existing codes and must not reuse or reorder
 /// them. Renumbering requires a major ABI version.
 ///
+/// This table is the single source of truth for the doc side of the mapping and
+/// is checked against the enum and against `abi/contract_error_codes.golden` by
+/// `scripts/check_error_codes.sh` (Issue #402). Before that check existed the
+/// table had drifted four codes out of step with the enum from code 17 onward,
+/// which would have made an off-chain consumer decode `InvalidPauseReason` as
+/// `ChallengeAlreadyActive`.
+///
 /// | Code | Variant | Raised by |
 /// |------|---------|-----------|
 /// | 1 | `AlreadyInitialized` | `initialize` |
@@ -27,14 +34,27 @@ use soroban_sdk::contracterror;
 /// | 14 | `InvalidBatchSize` | `batch_verify`, `batch_remove` |
 /// | 15 | `InvalidReasonCode` | `revoke_verification` |
 /// | 16 | `ZeroAddress` | `register` |
-/// | 17 | `InvalidPauseReason` | `pause`, `unpause`, `set_paused` |
-/// | 18 | `AlreadyReserved` | `add_reserved` |
-/// | 19 | `NotReserved` | `remove_reserved` |
-/// | 20 | `UsernameReserved` | `register` |
-/// | 21 | `ReservedListFull` | `add_reserved` |
+/// | 17 | `ChallengeAlreadyActive` | `start_challenge` |
+/// | 18 | `NoChallengeActive` | `cancel_challenge`, `complete_challenge` |
+/// | 19 | `ChallengeNotResolvable` | `complete_challenge` |
+/// | 20 | `ChallengeActive` | `register` |
+/// | 21 | `InvalidPauseReason` | `pause`, `unpause`, `set_paused` |
+/// | 22 | `AlreadyReserved` | `add_reserved` |
+/// | 23 | `NotReserved` | `remove_reserved` |
+/// | 24 | `UsernameReserved` | `register` |
+/// | 25 | `ReservedListFull` | `add_reserved` |
+/// | 26 | `AdminTransferPending` | `propose_admin_transfer` |
+/// | 27 | `AdminTransferDelayActive` | `execute_admin_transfer` |
+/// | 28 | `NoPendingAdminTransfer` | `execute_admin_transfer`, `cancel_admin_transfer` |
+/// | 29 | `AttestationRequired` | `upgrade` |
+/// | 30 | `NetworkMismatch` | any gated call on state restored to a different network |
 /// | 31 | `VerifierAllowlistFull` | `add_verifier` |
 /// | 32 | `VerifierNotAllowlisted` | `remove_verifier` |
 /// | 33 | `VerifierExpiryInPast` | `add_verifier` |
+/// | 34 | `NoPendingRoleGrant` | `activate_role`, `cancel_role_grant` |
+/// | 35 | `RoleGrantNotReady` | `activate_role` |
+/// | 36 | `ProvenanceMissing` | `assert_build`, `set_provenance_digests` |
+/// | 37 | `ProvenanceMismatch` | `assert_build` |
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -103,6 +123,19 @@ pub enum ContractError {
     NoPendingAdminTransfer = 28,
     /// `upgrade` was called without a required attestation (attestation-required mode is on).
     AttestationRequired = 29,
+    /// A gated call was made on instance state whose recorded network id does
+    /// not match the network executing it (Issue #231 / #401).
+    ///
+    /// Raised by `storage::require_matching_network`, which rides along inside
+    /// `require_initialized` so a new entry point cannot forget the check.
+    /// State restored onto the wrong network is the case this catches — a
+    /// testnet snapshot replayed against mainnet, or the reverse.
+    ///
+    /// Takes code 30, which was an unused gap between `AttestationRequired`
+    /// (29) and `VerifierAllowlistFull` (31). Filling the gap rather than
+    /// appending at 38 keeps every existing discriminant untouched, so this is
+    /// not an ABI break.
+    NetworkMismatch = 30,
     /// `add_verifier` would exceed the `MAX_VERIFIERS` allowlist cap (Issue #293).
     VerifierAllowlistFull = 31,
     /// `remove_verifier` was called for an address not on the allowlist (Issue #293).
@@ -164,6 +197,7 @@ impl ContractError {
             27 => Some(ContractError::AdminTransferDelayActive),
             28 => Some(ContractError::NoPendingAdminTransfer),
             29 => Some(ContractError::AttestationRequired),
+            30 => Some(ContractError::NetworkMismatch),
             31 => Some(ContractError::VerifierAllowlistFull),
             32 => Some(ContractError::VerifierNotAllowlisted),
             33 => Some(ContractError::VerifierExpiryInPast),
@@ -247,6 +281,9 @@ impl ContractError {
             ContractError::NoPendingRoleGrant => ErrorCategory::Fatal,
             ContractError::ProvenanceMissing => ErrorCategory::Fatal,
             ContractError::ProvenanceMismatch => ErrorCategory::Fatal,
+            // Fatal, not Retry: the executing network does not change between
+            // attempts. Someone has to re-deploy or re-tag the instance.
+            ContractError::NetworkMismatch => ErrorCategory::Fatal,
 
             // A pending grant becomes activatable once its timelock elapses.
             ContractError::RoleGrantNotReady => ErrorCategory::Retry,
@@ -263,31 +300,18 @@ impl ContractError {
     }
 }
 
-// Wave #42: ContractError code mapping for register / verify / remove / export
-// consumers (dashboard, indexer, off-chain tooling) that need stable u32 codes
-// without depending on the Rust enum layout.
+// Wave #42 left a second copy of the code table here. It had already drifted —
+// it listed code 21 as `NetworkMismatch` while the enum had 21 as
+// `InvalidPauseReason` and no `NetworkMismatch` variant at all, so an off-chain
+// consumer built from this table would have decoded a paused-reason failure as
+// a network mismatch (Issue #402).
 //
-// | Code | Variant             | Raised by                          |
-// |------|----------------------|-------------------------------------|
-// | 1    | AlreadyInitialized   | initialize                         |
-// | 2    | NotInitialized       | register, remove, get_all_registered, verify, revoke_verification |
-// | 3    | NotAuthorized        | remove, verify, revoke_verification |
-// | 4    | NotRegistered        | remove, verify, revoke_verification |
-// | 5    | AlreadyVerified      | verify                             |
-// | 6    | NotVerified          | revoke_verification                |
-// | 7    | Paused               | any state-mutating call while paused |
-// | 8    | CooldownActive       | upgrade                            |
-// | 9    | InvalidVersion       | migrate                            |
-// | 10   | InvalidRole          | set_role                           |
-// | 11   | InvalidUsername      | register                           |
-// | 12   | AttestationExpired   | attest_upgrade, upgrade            |
-// | 13   | UnattestedWasm       | upgrade                            |
-// | 14   | InvalidBatchSize     | extend_registry_ttl                |
-// | 15   | InvalidReasonCode    | revoke_verification                |
-// | 16   | ZeroAddress          | register                           |
-// | 21   | NetworkMismatch      | any call on state restored to a different network |
+// Two tables that must agree are one table too many. The authoritative listing
+// is the doc comment on `ContractError` above, cross-checked against
+// `abi/contract_error_codes.golden` and `docs/ABI.md` by
+// `scripts/check_error_codes.sh`.
 //
-// `ContractError::from_code` is the reverse of this table for off-chain
+// `ContractError::from_code` is the reverse of that table for off-chain
 // consumers decoding a raw error code back into a typed variant.
 //
 // Tests covering this mapping live in `src/lib.rs`

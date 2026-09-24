@@ -1719,6 +1719,13 @@ impl TrustBridgeContract {
                 upgraded_at: now,
                 version: soroban_sdk::vec![&env, version.0, version.1, version.2],
                 attested: false, // multisig path; attestation is orthogonal
+                // Same policy as the single-admin `upgrade` path: the chain has
+                // no way to know either digest at upgrade time, so the operator
+                // records them afterwards with `set_provenance_digests`
+                // (Issue #224). Omitting the fields here did not default them —
+                // it failed to compile (Issue #400).
+                sbom_hash: None,
+                source_hash: None,
             },
         );
 
@@ -12393,5 +12400,203 @@ mod test {
                 "last_event_ledger must be monotonically non-decreasing ({second} < {first})"
             );
         });
+    }
+
+    // ── Provenance digests & assert_build (Issues #225 / #400) ──────────────
+
+    /// Builds a provenance record with both digests set, the shape every write
+    /// path now produces. The multisig path used to omit the two fields
+    /// entirely, which did not default them — it failed to compile (Issue #400).
+    fn provenance_with(
+        env: &Env,
+        admin: &Address,
+        wasm_hash: BytesN<32>,
+        sbom_hash: Option<BytesN<32>>,
+        source_hash: Option<BytesN<32>>,
+    ) -> crate::storage::WasmProvenance {
+        crate::storage::WasmProvenance {
+            wasm_hash,
+            previous_wasm_hash: None,
+            upgraded_by: admin.clone(),
+            upgraded_at: env.ledger().timestamp(),
+            version: soroban_sdk::vec![env, 1u32, 0u32, 0u32],
+            attested: false,
+            sbom_hash,
+            source_hash,
+        }
+    }
+
+    #[test]
+    fn assert_build_succeeds_on_a_matching_hash() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, _, _, contract_id) = setup(&env);
+
+        let hash = BytesN::from_array(&env, &[7u8; 32]);
+        env.as_contract(&contract_id, || {
+            set_wasm_provenance(&env, &provenance_with(&env, &admin, hash.clone(), None, None));
+            assert_eq!(
+                TrustBridgeContract::assert_build(env.clone(), hash.clone()),
+                Ok(())
+            );
+        });
+    }
+
+    #[test]
+    fn assert_build_reports_a_mismatch() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, _, _, contract_id) = setup(&env);
+
+        let stored = BytesN::from_array(&env, &[7u8; 32]);
+        let other = BytesN::from_array(&env, &[8u8; 32]);
+
+        env.as_contract(&contract_id, || {
+            set_wasm_provenance(&env, &provenance_with(&env, &admin, stored, None, None));
+            assert_eq!(
+                TrustBridgeContract::assert_build(env.clone(), other),
+                Err(ContractError::ProvenanceMismatch)
+            );
+        });
+    }
+
+    #[test]
+    fn assert_build_reports_missing_provenance() {
+        // A contract that has never upgraded has nothing to compare against.
+        // Reporting that distinctly matters: "nothing deployed yet" and
+        // "you built the wrong thing" call for different operator action.
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_, _, _, contract_id) = setup(&env);
+
+        env.as_contract(&contract_id, || {
+            assert_eq!(
+                TrustBridgeContract::assert_build(
+                    env.clone(),
+                    BytesN::from_array(&env, &[7u8; 32])
+                ),
+                Err(ContractError::ProvenanceMissing)
+            );
+        });
+    }
+
+    #[test]
+    fn set_provenance_digests_fills_each_field_independently() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, _, _, contract_id) = setup(&env);
+
+        let hash = BytesN::from_array(&env, &[7u8; 32]);
+        let sbom = BytesN::from_array(&env, &[1u8; 32]);
+        let source = BytesN::from_array(&env, &[2u8; 32]);
+
+        env.as_contract(&contract_id, || {
+            set_wasm_provenance(&env, &provenance_with(&env, &admin, hash, None, None));
+
+            // Passing None must leave the other field untouched, which is what
+            // makes the two digests backfillable in separate calls.
+            TrustBridgeContract::set_provenance_digests(env.clone(), Some(sbom.clone()), None)
+                .unwrap();
+            let after_sbom = get_wasm_provenance(&env).unwrap();
+            assert_eq!(after_sbom.sbom_hash, Some(sbom.clone()));
+            assert_eq!(after_sbom.source_hash, None);
+
+            TrustBridgeContract::set_provenance_digests(env.clone(), None, Some(source.clone()))
+                .unwrap();
+            let after_source = get_wasm_provenance(&env).unwrap();
+            assert_eq!(after_source.sbom_hash, Some(sbom));
+            assert_eq!(after_source.source_hash, Some(source));
+        });
+    }
+
+    #[test]
+    fn set_provenance_digests_requires_an_existing_record() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_, _, _, contract_id) = setup(&env);
+
+        env.as_contract(&contract_id, || {
+            assert_eq!(
+                TrustBridgeContract::set_provenance_digests(
+                    env.clone(),
+                    Some(BytesN::from_array(&env, &[1u8; 32])),
+                    None
+                ),
+                Err(ContractError::ProvenanceMissing)
+            );
+        });
+    }
+
+    // ── NetworkMismatch (Issue #401) ───────────────────────────────────────
+
+    #[test]
+    fn network_mismatch_has_the_documented_discriminant() {
+        // Code 30 is load-bearing: it is what off-chain decoders branch on, and
+        // it is asserted in abi/contract_error_codes.golden and docs/ABI.md.
+        assert_eq!(ContractError::NetworkMismatch.code(), 30);
+        assert_eq!(
+            ContractError::from_code(30),
+            Some(ContractError::NetworkMismatch)
+        );
+    }
+
+    #[test]
+    fn network_mismatch_does_not_collide_with_its_neighbours() {
+        // The bug this variant was added around: docs had NetworkMismatch at 21,
+        // where InvalidPauseReason actually lives (Issue #402).
+        assert_eq!(ContractError::InvalidPauseReason.code(), 21);
+        assert_ne!(
+            ContractError::NetworkMismatch.code(),
+            ContractError::InvalidPauseReason.code()
+        );
+        assert_eq!(ContractError::AttestationRequired.code(), 29);
+        assert_eq!(ContractError::VerifierAllowlistFull.code(), 31);
+    }
+
+    #[test]
+    fn a_matching_network_passes_the_check() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_, _, _, contract_id) = setup(&env);
+
+        // `initialize` tags the instance with the executing network, so the
+        // check must pass immediately afterwards.
+        env.as_contract(&contract_id, || {
+            assert_eq!(crate::storage::require_matching_network(&env), Ok(()));
+        });
+    }
+
+    #[test]
+    fn a_foreign_network_tag_is_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_, _, _, contract_id) = setup(&env);
+
+        env.as_contract(&contract_id, || {
+            // Stand in for state restored from another network.
+            crate::storage::set_network_id(&env, &BytesN::from_array(&env, &[0xAB; 32]));
+
+            assert_eq!(
+                crate::storage::require_matching_network(&env),
+                Err(ContractError::NetworkMismatch)
+            );
+            // And it rides along inside require_initialized, which is what makes
+            // a new entry point unable to forget the check.
+            assert_eq!(
+                crate::storage::require_initialized(&env),
+                Err(ContractError::NetworkMismatch)
+            );
+        });
+    }
+
+    #[test]
+    fn network_mismatch_is_fatal_not_retryable() {
+        // The executing network does not change between attempts — retrying the
+        // same call forever would be the wrong off-chain behaviour.
+        assert_eq!(
+            ContractError::NetworkMismatch.category(),
+            crate::error::ErrorCategory::Fatal
+        );
+        assert!(!ContractError::NetworkMismatch.is_retryable());
     }
 }

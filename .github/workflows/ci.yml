@@ -24,3 +24,15 @@ jobs:
           test -f src/lib.rs
           test -f README.md
           test -f Makefile
+
+      # Issue #402: fails if the ContractError discriminants drift apart across
+      # src/error.rs, from_code, abi/contract_error_codes.golden and
+      # docs/ABI.md, or if a discriminant is reused. Cheap and dependency-free,
+      # so it runs before the build rather than after it.
+      - name: Check ABI error-code consistency
+        run: ./scripts/check_error_codes.sh
+
+      # Issue #399: the reference indexer classifies event topics from a table
+      # that has to stay in step with src/events.rs.
+      - name: Check event indexer topic table
+        run: ./scripts/check_event_topics.sh
