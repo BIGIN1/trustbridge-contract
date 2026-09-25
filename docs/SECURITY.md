@@ -1075,42 +1075,69 @@ day to notice and cancel.
 
 ## On-Chain Audit Logging
 
-The contract records structured audit log entries into contract storage upon state mutations (`initialize`, `register`, `remove`, `verify`, `batch_verify`, `pause`, `unpause`, `config_verification`, `set_role`).
+The contract records structured `AuditLogEntry` values into instance storage on
+state mutations. Issue #397 widened the coverage: the event type used to
+collapse several distinct admin actions into one `ADMIN_ACTION`, and three of
+them were not recorded at all.
+
+### Event types
+
+| Code | `as_str()` | Written by |
+|------|------------|------------|
+| 1 | `CONTRACT_INITIALIZED` | `initialize` |
+| 2 | `USER_REGISTERED` | `register`, `batch_register` |
+| 3 | `USER_REMOVED` | `remove`, `batch_remove` |
+| 4 | `USER_VERIFIED` | `verify`, `batch_verify` |
+| 5 | `ADMIN_ACTION` | `config_verification` and other admin config changes |
+| 6 | `UNAUTHORIZED_ATTEMPT` | rejected authorization checks |
+| 7 | `DATA_EXPORTED` | `export_registry` |
+| 8 | `VERIFICATION_REVOKED` | `revoke_verification` |
+| 9 | `USER_RENAMED` | `rename` |
+| 10 | `CONTRACT_PAUSED` | `pause`, `emergency_pause`, `set_paused(true)` |
+| 11 | `CONTRACT_UNPAUSED` | `unpause`, `clear_emergency_pause`, `set_paused(false)` |
+| 12 | `ROLE_CHANGED` | `set_role`, `activate_role` |
+| 13 | `CONTRACT_UPGRADED` | `upgrade` |
+
+Codes and strings are **append-only**, for the same reason `ContractError`'s
+are: an indexer stores them, so renumbering or renaming silently re-labels
+history it has already written.
+
+Three of these fixed real gaps rather than just relabelling:
+
+- `revoke_verification` wrote **no** audit entry. The contract event existed,
+  but events are not retained on-chain, so losing verification left nothing a
+  reader querying the contract could see.
+- `upgrade` wrote none either — the single entry that matters most, since an
+  upgrade replaces the code every other entry was produced by.
+- `rename` wrote `USER_REGISTERED`, so a rename read back as a new
+  registration: registrations were double-counted and renames were invisible.
+  It now records the new name in `target_username` and the old one in
+  `details`, so the entry is findable from the name the record used to have.
+
+`CONTRACT_PAUSED` / `CONTRACT_UNPAUSED` replace `ADMIN_ACTION` on the whole
+pause family. Direction matters more than the fact an admin acted: an auditor
+reading `ADMIN_ACTION` had to correlate with the preceding entry to learn
+whether the contract had gone down or come back up.
 
 ### What IS an On-Chain Audit Log
 
-- **Structured compliance record**: An on-chain log entry (`AuditLogEntry`) persisted in instance storage recording event type (`AuditEventType`), timestamp, actor address, target username/address, and details.
-- **Operator query surface**: Callable on-chain via `get_audit_logs()` and `get_audit_stats()`.
-- **Bounded ring buffer**: Maintained up to a maximum cap (100 entries) per contract instance to stay within Soroban memory and footprint boundaries.
+- **Structured compliance record**: an entry persisted in instance storage with
+  event type, timestamp, actor address, target username/address, and details.
+- **Operator query surface**: readable on-chain via `get_audit_logs()` and
+  `get_audit_stats()`.
+- **Bounded ring buffer**: capped at `MAX_AUDIT_LOG_ENTRIES` (100) per contract
+  instance to stay inside Soroban's memory and footprint budget. `push_audit_entry`
+  evicts the oldest entry when full, so the new event types above cannot grow
+  storage — they change which entries are written, not how many are retained.
 
 ### What IS NOT an On-Chain Audit Log
 
-- **Domain events replacement**: Audit log entries complement, but do not replace, Soroban domain events (`RegisteredEvent`, `VerifiedEvent`, `RemovedEvent`, etc.). Off-chain indexers still rely on domain events for event stream monitoring.
-- **Unbounded historical store**: Audit entries are capped on-chain. Complete long-term history across all ledgers should be collected by off-chain indexers from event topics or block archives.
-
----
-
-## Audit Status
-
-This contract has **not** been formally audited. Use at your own risk on mainnet until an audit is completed.
-
-For production deployments, consider:
-
-- Independent security audit
-- Bug bounty program
-- Staged rollout on testnet/futurenet first
-
-
-### What IS an On-Chain Audit Log
-
-- **Structured compliance record**: An on-chain log entry (`AuditLogEntry`) persisted in instance storage recording event type (`AuditEventType`), timestamp, actor address, target username/address, and details.
-- **Operator query surface**: Callable on-chain via `get_audit_logs()` and `get_audit_stats()`.
-- **Bounded ring buffer**: Maintained up to a maximum cap (100 entries) per contract instance to stay within Soroban memory and footprint boundaries.
-
-### What IS NOT an On-Chain Audit Log
-
-- **Domain events replacement**: Audit log entries complement, but do not replace, Soroban domain events (`RegisteredEvent`, `VerifiedEvent`, `RemovedEvent`, etc.). Off-chain indexers still rely on domain events for event stream monitoring.
-- **Unbounded historical store**: Audit entries are capped on-chain. Complete long-term history across all ledgers should be collected by off-chain indexers from event topics or block archives.
+- **A replacement for domain events**: entries complement `RegisteredEvent`,
+  `VerifiedEvent`, `RemovedEvent` and friends. Off-chain indexers still consume
+  the event stream.
+- **An unbounded historical store**: with a 100-entry cap, long-term history is
+  the indexer's job. On a busy contract the on-chain log is a recent window,
+  not an archive — do not design a compliance process that assumes otherwise.
 
 ---
 
