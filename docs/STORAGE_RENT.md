@@ -209,9 +209,41 @@ on-chain keeper endpoint. An off-chain job should:
 2. For each username, check whether its remaining TTL is approaching `TTL_THRESHOLD` (30 days).
 3. Batch usernames into groups of up to **100** and call `extend_registry_ttl`.
 
-The batch size limit is `BatchConfig::default().max_batch_size = 100`. See
+The batch size limit is `BatchConfig::default().max_batch_size` (`src/batch.rs`). See
 [ABI.md §extend_registry_ttl](ABI.md#extend_registry_ttlusernames-vecstring---resultu32-contracterror)
-for the complete specification.
+for the complete specification, and
+[tests/extend_registry_ttl.rs](../tests/extend_registry_ttl.rs) for the
+contract-side behaviour these batches rely on.
+
+> **Do not copy the number into a keeper.** `scripts/ttl_keeper.sh` reads the
+> cap out of `src/batch.rs` at startup and refuses to run if it cannot. A
+> hard-coded batch size keeps sending oversized batches after the contract
+> tightens its cap, and every one comes back `InvalidBatchSize` — a keeper that
+> appears to run and extends nothing, while the records expire silently.
+
+### Running the keeper
+
+`scripts/ttl_keeper.sh` is the reference implementation of the loop above. Run
+it through the Makefile rather than directly, so the contract id, source
+identity and network come from the same variables as every other target:
+
+```bash
+# Preview the batches without sending anything
+make ttl-keeper CONTRACT_ID=C... SOURCE=keeper TTL_KEEPER_DRY_RUN=true
+
+# Extend for real
+make ttl-keeper CONTRACT_ID=C... SOURCE=keeper NETWORK=testnet
+
+# Smaller batches, e.g. when the per-transaction budget is tight
+make ttl-keeper CONTRACT_ID=C... SOURCE=keeper TTL_KEEPER_BATCH_SIZE=25
+```
+
+The keeper is permissionless, so `SOURCE` only needs to be an identity that can
+pay transaction fees — not the admin.
+
+It exits non-zero if any batch failed. That matters when it runs unattended on
+a timer: exiting 0 after every batch failed would report a successful run while
+the records quietly expire.
 
 ```bash
 # Extend a batch of cold records (example)
@@ -300,3 +332,6 @@ If the entry has been archived, the same key is what
 - [DEPLOYMENT.md](DEPLOYMENT.md) — Simulate-register and fee estimation
 - [ABI.md](ABI.md) — `extend_registry_ttl`, `get_public_paginated`, `get_registered_paginated`
 - [SECURITY.md](SECURITY.md) — TTL extension is permissionless by design
+- [`scripts/ttl_keeper.sh`](../scripts/ttl_keeper.sh) — reference keeper, run via `make ttl-keeper`
+- [`Makefile`](../Makefile) — the `ttl-keeper` target and its variables
+- [`tests/extend_registry_ttl.rs`](../tests/extend_registry_ttl.rs) — contract-side batch behaviour
