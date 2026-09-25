@@ -235,7 +235,6 @@ it. `ContractError::is_retryable()` is the shorthand for `category() == Retry`.
 | `NotInitialized` | `Fatal` | Needs an operator to run `initialize` |
 | `NotRegistered` | `Fatal` | Referenced username does not exist |
 | `AlreadyVerified` / `NotVerified` | `Fatal` | Record already in the requested state |
-| `InvalidEntityType` / `OrgNameRequired` | `Fatal` | Malformed `register` arguments |
 | `InvalidVersion` | `Fatal` | Target version not strictly greater |
 | `InvalidRole` | `Fatal` | Unknown role discriminant |
 | `InvalidUsername` | `Fatal` | Username fails validation |

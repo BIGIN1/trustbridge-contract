@@ -62,7 +62,6 @@ pub use storage::{
     Role, Stats, VerificationConfig, VerifierAllowEntry, WasmAttestation, WasmProvenance,
     MAX_VERIFIERS,
 };
-pub use storage::{ContributorRecord, EntityType, Stats};
 pub use version::Version;
 
 use crate::storage::get_public_paginated_internal;
@@ -1080,67 +1079,6 @@ impl TrustBridgeContract {
         storage_get_verify_limit(&env)
     }
 
-    fn register_personal(
-        env: &Env,
-        contract_id: &soroban_sdk::Address,
-        name: &str,
-        addr: &Address,
-    ) {
-        TrustBridgeContract::register(env.clone(), username(env, name), addr.clone(), 0, None)
-            .unwrap();
-    }
-
-    fn register_org(
-        env: &Env,
-        contract_id: &soroban_sdk::Address,
-        name: &str,
-        addr: &Address,
-        org: &str,
-    ) {
-        TrustBridgeContract::register(
-            env.clone(),
-            username(env, name),
-            addr.clone(),
-            1,
-            Some(username(env, org)),
-        )
-        .unwrap();
-    }
-
-    fn register_team(
-        env: &Env,
-        contract_id: &soroban_sdk::Address,
-        name: &str,
-        addr: &Address,
-        org: &str,
-    ) {
-        TrustBridgeContract::register(
-            env.clone(),
-            username(env, name),
-            addr.clone(),
-            2,
-            Some(username(env, org)),
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn test_register_and_get_address_roundtrip() {
-        let env = Env::default();
-        let (_admin, user, _other, contract_id) = setup(&env);
-
-        env.mock_all_auths();
-
-        env.as_contract(&contract_id, || {
-            register_personal(&env, &contract_id, "octocat", &user);
-
-            let record =
-                TrustBridgeContract::get_address(env.clone(), username(&env, "octocat")).unwrap();
-            assert_eq!(record.stellar_address, user);
-            assert!(!record.verified);
-            assert_eq!(record.entity_type, EntityType::Personal);
-        });
-    }
     /// Returns the stored contract schema version as `(major, minor, patch)`.
     ///
     /// Falls back to the compile-time [`CONTRACT_VERSION`] constant on instances
