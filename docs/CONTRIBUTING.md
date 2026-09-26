@@ -85,6 +85,10 @@ uses the stable Rust image to match CI.
 - Add unit tests in `#[cfg(test)] mod test` within `lib.rs`
 - Keep functions focused; storage helpers belong in `storage.rs`
 - Document non-obvious auth or storage decisions inline
+- Avoid module-wide `allow(dead_code)`. Wire required helpers into their intended
+   call sites or remove obsolete code. For intentionally staged items, put a
+   narrow `#[allow(dead_code)]` on the item and document the issue and why it
+   remains staged.
 
 ### Documentation
 
