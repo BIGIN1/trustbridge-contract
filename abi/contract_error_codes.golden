@@ -1,3 +1,18 @@
+# Frozen numeric ABI for ContractError (Issue #394).
+#
+# Off-chain consumers — the dashboard, the indexer, the action runner — read
+# these numbers out of a failed invocation's XDR result. A variant that gets
+# renumbered silently re-labels every historical failure those consumers have
+# already recorded, so the mapping is append-only and this file is the record.
+#
+# Format:
+#   <code> <Variant>   a live code, frozen to that variant
+#   !<code> reserved   a code that must stay unclaimed (see below)
+#   # ...              comment
+#
+# Adding an error: append the next unused code here and to the enum. Never
+# reuse, reorder, or renumber an existing one.
+
 1 AlreadyInitialized
 2 NotInitialized
 3 NotAuthorized
@@ -27,7 +42,14 @@
 27 AdminTransferDelayActive
 28 NoPendingAdminTransfer
 29 AttestationRequired
-30 NetworkMismatch
+
+# Code 30 was skipped when the verifier-allowlist errors (31-33) were added.
+# It is recorded as reserved rather than filled: handing it to a new error now
+# would make 30 mean one thing in this build and nothing in every earlier one,
+# which is the same ambiguity renumbering causes. The test asserts that
+# `from_code(30)` stays `None`.
+!30 reserved
+
 31 VerifierAllowlistFull
 32 VerifierNotAllowlisted
 33 VerifierExpiryInPast

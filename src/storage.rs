@@ -35,17 +35,6 @@ pub const VCOUNT_KEY: Symbol = symbol_short!("vcount");
 /// a contributor was verified at some point.
 pub const EVER_VCOUNT_KEY: Symbol = symbol_short!("evcount");
 pub const INDEX_KEY: Symbol = symbol_short!("idx");
-pub const ORG_INDEX_KEY: Symbol = symbol_short!("orgidx");
-pub const TEAM_INDEX_KEY: Symbol = symbol_short!("tmidx");
-
-/// Distinguishes personal accounts from organization and team entries.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[soroban_sdk::contracttype]
-pub enum EntityType {
-    Personal = 0,
-    Org = 1,
-    Team = 2,
-}
 pub const PAUSED_KEY: Symbol = symbol_short!("pause");
 /// Last `PauseReason` recorded by `pause` / `unpause`.
 pub const PAUSE_RSN_KEY: Symbol = symbol_short!("pause_rsn");
@@ -1214,64 +1203,6 @@ pub fn require_not_emergency_paused(env: &Env) -> Result<(), ContractError> {
     } else {
         Ok(())
     }
-}
-
-pub fn get_org_index(env: &Env) -> Vec<String> {
-    env.storage()
-        .instance()
-        .get(&ORG_INDEX_KEY)
-        .unwrap_or_else(|| Vec::new(env))
-}
-
-pub fn set_org_index(env: &Env, index: &Vec<String>) {
-    env.storage().instance().set(&ORG_INDEX_KEY, index);
-}
-
-pub fn add_to_org_index(env: &Env, org_name: &String) {
-    let mut index = get_org_index(env);
-    index.push_back(org_name.clone());
-    set_org_index(env, &index);
-}
-
-pub fn remove_from_org_index(env: &Env, org_name: &String) {
-    let index = get_org_index(env);
-    let mut next = Vec::new(env);
-    for i in 0..index.len() {
-        let name = index.get(i).unwrap();
-        if name != *org_name {
-            next.push_back(name);
-        }
-    }
-    set_org_index(env, &next);
-}
-
-pub fn get_team_index(env: &Env) -> Vec<String> {
-    env.storage()
-        .instance()
-        .get(&TEAM_INDEX_KEY)
-        .unwrap_or_else(|| Vec::new(env))
-}
-
-pub fn set_team_index(env: &Env, index: &Vec<String>) {
-    env.storage().instance().set(&TEAM_INDEX_KEY, index);
-}
-
-pub fn add_to_team_index(env: &Env, key: &String) {
-    let mut index = get_team_index(env);
-    index.push_back(key.clone());
-    set_team_index(env, &index);
-}
-
-pub fn remove_from_team_index(env: &Env, key: &String) {
-    let index = get_team_index(env);
-    let mut next = Vec::new(env);
-    for i in 0..index.len() {
-        let k = index.get(i).unwrap();
-        if k != *key {
-            next.push_back(k);
-        }
-    }
-    set_team_index(env, &next);
 }
 
 // ── Guardian (Issue #196) ─────────────────────────────────────────────────────

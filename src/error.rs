@@ -5,9 +5,31 @@ use soroban_sdk::contracterror;
 /// Each variant maps to a stable `u32` code (see `code()` / `from_code()`).
 /// Off-chain consumers such as the dashboard and indexer use these codes to
 /// classify failed invocations without depending on the Rust enum layout.
-/// Codes 1 through 16 are frozen in `abi/contract_error_codes.golden`; new
-/// errors must append after the existing codes and must not reuse or reorder
-/// them. Renumbering requires a major ABI version.
+///
+/// # Append-only policy
+///
+/// **Every** code is frozen in `abi/contract_error_codes.golden`, not just the
+/// first sixteen (Issue #394). `tests/contract_error_codes.rs` enforces the
+/// full set in both directions: each recorded code still maps to its variant,
+/// and each variant the enum defines has a record.
+///
+/// The rules, in order of how much damage breaking them does:
+///
+/// 1. **Never renumber or reorder an existing code.** Those numbers are read
+///    out of failed invocations' XDR results and stored by off-chain
+///    consumers. Renumbering silently re-labels every failure already
+///    recorded against the old number — including ones in an indexer's
+///    history that nobody will think to re-check.
+/// 2. **Never reuse a gap.** Code 30 is unused, and is recorded as reserved
+///    rather than filled. Handing it to a new error would make 30 mean one
+///    thing in this build and nothing in every earlier one, which is the same
+///    ambiguity renumbering causes.
+/// 3. **Append the next unused code**, and add the matching golden entry in
+///    the same change. A variant without a golden entry is unfrozen, and an
+///    unfrozen code is the one a later refactor renumbers freely.
+/// 4. **Removing a code is a breaking ABI change.** A consumer that still
+///    resolves the old number gets `None` and no explanation. It requires a
+///    major ABI version, as renumbering does.
 ///
 /// This table is the single source of truth for the doc side of the mapping and
 /// is checked against the enum and against `abi/contract_error_codes.golden` by
@@ -34,25 +56,25 @@ use soroban_sdk::contracterror;
 /// | 14 | `InvalidBatchSize` | `batch_verify`, `batch_remove` |
 /// | 15 | `InvalidReasonCode` | `revoke_verification` |
 /// | 16 | `ZeroAddress` | `register` |
-/// | 17 | `ChallengeAlreadyActive` | `start_challenge` |
-/// | 18 | `NoChallengeActive` | `cancel_challenge`, `complete_challenge` |
-/// | 19 | `ChallengeNotResolvable` | `complete_challenge` |
-/// | 20 | `ChallengeActive` | `register` |
+/// | 17 | `ChallengeAlreadyActive` | `open_challenge` |
+/// | 18 | `NoChallengeActive` | `resolve_challenge`, `cancel_challenge` |
+/// | 19 | `ChallengeNotResolvable` | `resolve_challenge` |
+/// | 20 | `ChallengeActive` | calls blocked while a challenge is open |
 /// | 21 | `InvalidPauseReason` | `pause`, `unpause`, `set_paused` |
 /// | 22 | `AlreadyReserved` | `add_reserved` |
 /// | 23 | `NotReserved` | `remove_reserved` |
 /// | 24 | `UsernameReserved` | `register` |
 /// | 25 | `ReservedListFull` | `add_reserved` |
-/// | 26 | `AdminTransferPending` | `propose_admin_transfer` |
-/// | 27 | `AdminTransferDelayActive` | `execute_admin_transfer` |
-/// | 28 | `NoPendingAdminTransfer` | `execute_admin_transfer`, `cancel_admin_transfer` |
+/// | 26 | `AdminTransferPending` | `transfer_admin` |
+/// | 27 | `AdminTransferDelayActive` | `accept_admin` |
+/// | 28 | `NoPendingAdminTransfer` | `accept_admin`, `cancel_admin_transfer` |
 /// | 29 | `AttestationRequired` | `upgrade` |
-/// | 30 | `NetworkMismatch` | any gated call on state restored to a different network |
+/// | 30 | — | *reserved, never assigned* |
 /// | 31 | `VerifierAllowlistFull` | `add_verifier` |
 /// | 33 | `VerifierExpiryInPast` | `add_verifier` |
 /// | 34 | `NoPendingRoleGrant` | `activate_role`, `cancel_role_grant` |
 /// | 35 | `RoleGrantNotReady` | `activate_role` |
-/// | 36 | `ProvenanceMissing` | `assert_build`, `set_provenance_digests` |
+/// | 36 | `ProvenanceMissing` | `assert_build` |
 /// | 37 | `ProvenanceMismatch` | `assert_build` |
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]

@@ -247,7 +247,7 @@ impl TrustBridgeContract {
 
         push_audit_entry(
             &env,
-            AuditLogEntry::new(AuditEventType::AdminAction, timestamp, Some(admin)),
+            AuditLogEntry::new(AuditEventType::ContractPaused, timestamp, Some(admin)),
         );
 
         Ok(())
@@ -291,7 +291,7 @@ impl TrustBridgeContract {
 
         push_audit_entry(
             &env,
-            AuditLogEntry::new(AuditEventType::AdminAction, timestamp, Some(admin)),
+            AuditLogEntry::new(AuditEventType::ContractUnpaused, timestamp, Some(admin)),
         );
 
         Ok(())
@@ -428,7 +428,7 @@ impl TrustBridgeContract {
 
         push_audit_entry(
             &env,
-            AuditLogEntry::new(AuditEventType::AdminAction, timestamp, Some(caller)),
+            AuditLogEntry::new(AuditEventType::ContractPaused, timestamp, Some(caller)),
         );
 
         Ok(())
@@ -474,7 +474,7 @@ impl TrustBridgeContract {
 
         push_audit_entry(
             &env,
-            AuditLogEntry::new(AuditEventType::AdminAction, timestamp, Some(admin)),
+            AuditLogEntry::new(AuditEventType::ContractUnpaused, timestamp, Some(admin)),
         );
 
         Ok(())
@@ -534,13 +534,22 @@ impl TrustBridgeContract {
 
         storage_set_role(&env, &target, &role);
         RoleGrantedEvent {
-            address: target,
+            address: target.clone(),
             role: role as u32,
-            admin,
+            admin: admin.clone(),
             timestamp,
             domain: event_domain(&env),
         }
         .publish(&env);
+
+        // Who holds which role is the first thing an incident review asks.
+        // It was reconstructable only from events, which are not retained
+        // on-chain (Issue #397).
+        push_audit_entry(
+            &env,
+            AuditLogEntry::new(AuditEventType::RoleChanged, timestamp, Some(admin))
+                .with_address(target),
+        );
 
         Ok(())
     }
@@ -604,13 +613,22 @@ impl TrustBridgeContract {
         storage_set_role(&env, &target, &pending.role);
         remove_pending_role(&env, &target);
         RoleGrantedEvent {
-            address: target,
+            address: target.clone(),
             role: pending.role as u32,
-            admin,
+            admin: admin.clone(),
             timestamp,
             domain: event_domain(&env),
         }
         .publish(&env);
+
+        // Activation, not the earlier `set_role`, is when the grant takes
+        // effect — so it is the entry that answers "when did this address
+        // gain the role" (Issue #397).
+        push_audit_entry(
+            &env,
+            AuditLogEntry::new(AuditEventType::RoleChanged, timestamp, Some(admin))
+                .with_address(target),
+        );
 
         Ok(())
     }
@@ -1233,6 +1251,15 @@ impl TrustBridgeContract {
             domain: event_domain(&env),
         }
         .publish(&env);
+
+        // An upgrade replaces the code every other audit entry was produced
+        // by, so it is the single most important entry in the log — and it
+        // was not being written (Issue #397). Recorded after the WASM swap so
+        // it lands in the storage the new binary reads.
+        push_audit_entry(
+            &env,
+            AuditLogEntry::new(AuditEventType::ContractUpgraded, now, Some(admin)),
+        );
 
         Ok(())
     }
@@ -3102,7 +3129,19 @@ impl TrustBridgeContract {
 
         push_audit_entry(
             &env,
-            AuditLogEntry::new(AuditEventType::AdminAction, timestamp, Some(admin)),
+            AuditLogEntry::new(
+                // Direction matters more than the fact an admin acted: an
+                // auditor reading "ADMIN_ACTION" has to correlate with the
+                // previous entry to learn whether the contract went down or
+                // came back up.
+                if paused {
+                    AuditEventType::ContractPaused
+                } else {
+                    AuditEventType::ContractUnpaused
+                },
+                timestamp,
+                Some(admin),
+            ),
         );
 
         Ok(())
@@ -3438,6 +3477,21 @@ impl TrustBridgeContract {
         }
         .publish(&env);
 
+        // Revocation wrote no audit entry at all before Issue #397. The
+        // contract event exists, but events are not retained on-chain — the
+        // audit log is what a reader querying the contract can still see, and
+        // losing verification is exactly the state change it should record.
+        push_audit_entry(
+            &env,
+            AuditLogEntry::new(
+                AuditEventType::VerificationRevoked,
+                timestamp,
+                Some(caller.clone()),
+            )
+            .with_username(github_username.clone())
+            .with_address(record.stellar_address.clone()),
+        );
+
         Ok(())
     }
 
@@ -3620,10 +3674,15 @@ impl TrustBridgeContract {
         push_audit_entry(
             &env,
             AuditLogEntry::new(
-                AuditEventType::UserRegistered,
+                AuditEventType::UserRenamed,
                 timestamp,
                 Some(record.stellar_address),
-            ),
+            )
+            // The new name alone would leave no way to find the entry from the
+            // name the record used to have, which is what an auditor
+            // investigating the old username searches for.
+            .with_username(new_username.clone())
+            .with_details(old_username.clone()),
         );
 
         Ok(())
@@ -4365,6 +4424,149 @@ mod test {
 
     fn username(env: &Env, name: &str) -> String {
         String::from_str(env, name)
+    }
+
+    // ── Audit event coverage for revoke / pause (Issue #397) ────────────────
+
+    /// The event types on the audit log, oldest first.
+    fn audit_event_types(env: &Env, contract_id: &Address) -> alloc::vec::Vec<AuditEventType> {
+        env.as_contract(contract_id, || {
+            TrustBridgeContract::get_audit_logs(env.clone())
+                .iter()
+                .map(|entry| entry.event_type)
+                .collect()
+        })
+    }
+
+    #[test]
+    fn revoke_verification_writes_an_audit_entry() {
+        let env = Env::default();
+        let (admin, user1, _other, contract_id) = setup(&env);
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            register_personal(&env, &contract_id, "octocat", &user1);
+            TrustBridgeContract::verify(env.clone(), admin.clone(), username(&env, "octocat"))
+                .unwrap();
+            TrustBridgeContract::revoke_verification(
+                env.clone(),
+                admin.clone(),
+                username(&env, "octocat"),
+                RevokeReason::CompromisedKey as u32,
+            )
+            .unwrap();
+        });
+
+        let entry = env.as_contract(&contract_id, || {
+            TrustBridgeContract::get_audit_logs(env.clone())
+                .iter()
+                .find(|e| e.event_type == AuditEventType::VerificationRevoked)
+                .expect("revoke_verification must write an audit entry")
+        });
+
+        // Losing verification is a state change a reader querying the contract
+        // has to be able to see; before #397 it left no audit entry at all.
+        assert_eq!(entry.actor, Some(admin));
+        assert_eq!(entry.target_username, Some(username(&env, "octocat")));
+        assert_eq!(entry.target_address, Some(user1));
+    }
+
+    #[test]
+    fn revoke_is_distinguishable_from_verify_in_the_log() {
+        let env = Env::default();
+        let (admin, user1, _other, contract_id) = setup(&env);
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            register_personal(&env, &contract_id, "octocat", &user1);
+            TrustBridgeContract::verify(env.clone(), admin.clone(), username(&env, "octocat"))
+                .unwrap();
+            TrustBridgeContract::revoke_verification(
+                env.clone(),
+                admin.clone(),
+                username(&env, "octocat"),
+                RevokeReason::OperatorError as u32,
+            )
+            .unwrap();
+        });
+
+        let types = audit_event_types(&env, &contract_id);
+        let verified = types
+            .iter()
+            .filter(|t| **t == AuditEventType::UserVerified)
+            .count();
+        let revoked = types
+            .iter()
+            .filter(|t| **t == AuditEventType::VerificationRevoked)
+            .count();
+
+        assert_eq!(verified, 1);
+        assert_eq!(revoked, 1);
+    }
+
+    #[test]
+    fn pause_and_unpause_record_their_direction() {
+        let env = Env::default();
+        let (_admin, _user1, _other, contract_id) = setup(&env);
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::pause(env.clone(), PauseReason::Maintenance as u32).unwrap();
+            TrustBridgeContract::unpause(env.clone(), PauseReason::Unpause as u32).unwrap();
+        });
+
+        let types = audit_event_types(&env, &contract_id);
+
+        // Both used to be ADMIN_ACTION, so an auditor could not tell whether
+        // the contract had gone down or come back up without correlating with
+        // the entry before it.
+        let paused_at = types
+            .iter()
+            .position(|t| *t == AuditEventType::ContractPaused)
+            .expect("pause must record CONTRACT_PAUSED");
+        let unpaused_at = types
+            .iter()
+            .position(|t| *t == AuditEventType::ContractUnpaused)
+            .expect("unpause must record CONTRACT_UNPAUSED");
+
+        assert!(
+            paused_at < unpaused_at,
+            "entries must be in the order the calls happened"
+        );
+    }
+
+    #[test]
+    fn set_paused_records_the_direction_it_moved() {
+        let env = Env::default();
+        let (_admin, _user1, _other, contract_id) = setup(&env);
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::set_paused(env.clone(), true, PauseReason::SecurityIncident as u32)
+                .unwrap();
+        });
+        assert!(audit_event_types(&env, &contract_id)
+            .contains(&AuditEventType::ContractPaused));
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::set_paused(env.clone(), false, PauseReason::Unpause as u32)
+                .unwrap();
+        });
+        assert!(audit_event_types(&env, &contract_id)
+            .contains(&AuditEventType::ContractUnpaused));
+    }
+
+    #[test]
+    fn audit_event_type_strings_are_stable() {
+        // Indexers match on these strings; changing one silently re-labels
+        // history it has already written.
+        assert_eq!(AuditEventType::VerificationRevoked.as_str(), "VERIFICATION_REVOKED");
+        assert_eq!(AuditEventType::UserRenamed.as_str(), "USER_RENAMED");
+        assert_eq!(AuditEventType::ContractPaused.as_str(), "CONTRACT_PAUSED");
+        assert_eq!(AuditEventType::ContractUnpaused.as_str(), "CONTRACT_UNPAUSED");
+        assert_eq!(AuditEventType::RoleChanged.as_str(), "ROLE_CHANGED");
+        assert_eq!(AuditEventType::ContractUpgraded.as_str(), "CONTRACT_UPGRADED");
     }
 
     /// Registers `name` to `addr` with no fallback addresses. Must be called

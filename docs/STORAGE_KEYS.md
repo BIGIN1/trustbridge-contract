@@ -18,6 +18,12 @@ These keys live in Soroban's **instance** storage partition. Each key is a `Symb
 | `"count"` | `COUNT_KEY` | `u32` | Total number of active registrations (incremented on register, decremented on remove) |
 | `"vcount"` | `VCOUNT_KEY` | `u32` | Count of verified registrations (incremented on verify, decremented on revoke or address-change re-reg) |
 | `"idx"` | `INDEX_KEY` | `Vec<String>` | Ordered list of all registered usernames used for admin export |
+
+<!-- `"orgidx"` / `"tmidx"` were defined in storage.rs but never listed here,
+     never written by any entry point, and never read. Removed in Issue #398;
+     see ARCHITECTURE.md#contributorrecord. Do not re-add either symbol for a
+     different purpose — an instance that was ever deployed with the old build
+     may hold an empty Vec under it. -->
 | `"pause"` | `PAUSED_KEY` | `bool` | Pauses all state-mutating operations when set to `true` |
 | `"cdown"` | `COOLDOWN_KEY` | `u64` | WASM upgrade timelock cooldown period in seconds |
 | `"lastupg"` | `LAST_UPG_KEY` | `u64` | Ledger timestamp of the most recent upgrade |

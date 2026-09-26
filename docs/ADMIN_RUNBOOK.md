@@ -572,19 +572,33 @@ Soroban persistent entries expire unless their TTL is extended. A registry with 
 Run the `ttl_keeper.sh` script periodically (e.g., weekly or monthly) to walk the entire registry and bump the TTL of every registered contributor.
 
 ```bash
-CONTRACT_ID=C... SOURCE=keeper-identity NETWORK=testnet ./scripts/ttl_keeper.sh
+# Preferred: the Makefile target, so contract id / source / network come from
+# the same variables as every other operation (Issue #395).
+make ttl-keeper CONTRACT_ID=C... SOURCE=keeper-identity NETWORK=testnet
+
+# Preview without sending
+make ttl-keeper CONTRACT_ID=C... SOURCE=keeper-identity TTL_KEEPER_DRY_RUN=true
 ```
 
 **Notes:**
 - **Permissionless**: You do not need to use the contract admin key for this. Any funded identity can pay the transaction fees to extend TTLs.
-- **Batching**: The script handles batching automatically to avoid exceeding transaction limits.
-- **Dry-run**: You can pass `--dry-run` to test the script without submitting any transactions.
+- **Batching**: The script reads the batch cap out of `src/batch.rs` at startup rather than hard-coding it, and refuses to start if it cannot. Override with `TTL_KEEPER_BATCH_SIZE` only to go *smaller*.
+- **Dry-run**: `TTL_KEEPER_DRY_RUN=true` (or `--dry-run` when calling the script directly) walks the registry and prints the batches without submitting.
+- **Exit status**: non-zero if any batch failed. Check it when running on a timer — a keeper that reports success while every batch failed lets the records expire silently.
+- See [STORAGE_RENT.md](STORAGE_RENT.md#keeper-implementation) for the economics and [`tests/extend_registry_ttl.rs`](../tests/extend_registry_ttl.rs) for contract-side behaviour.
 
 ---
 
 ## Emergency Pause Lifecycle
 
 In case of a detected security vulnerability, operational incident, or during maintenance windows, the contract admin can pause all state mutations.
+
+> **Audit trail (Issue #397):** pausing and unpausing now write distinct
+> `CONTRACT_PAUSED` / `CONTRACT_UNPAUSED` audit entries instead of a generic
+> `ADMIN_ACTION`, so `get_audit_logs()` shows which direction the contract
+> moved without correlating against the preceding entry. `revoke_verification`,
+> `rename`, role changes and `upgrade` are recorded distinctly too — see
+> [SECURITY.md](SECURITY.md#on-chain-audit-logging) for the full table.
 
 ### 1. Trigger Pause
 To pause the contract:

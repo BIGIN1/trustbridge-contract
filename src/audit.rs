@@ -9,6 +9,9 @@ use soroban_sdk::{contracttype, Address, String};
 #[contracttype]
 #[repr(u32)]
 pub enum AuditEventType {
+    // Codes are append-only for the same reason `ContractError`'s are: an
+    // indexer stores the number, so renumbering silently re-labels history it
+    // has already written. Add new variants at the end.
     /// Contract initialization
     ContractInitialized = 1,
     /// User registration
@@ -23,6 +26,18 @@ pub enum AuditEventType {
     UnauthorizedAttempt = 6,
     /// Data export (for dashboard sync)
     DataExported = 7,
+    /// A verification was revoked (Issue #397).
+    VerificationRevoked = 8,
+    /// A registration was moved to a new username (Issue #397).
+    UserRenamed = 9,
+    /// The contract was paused, by `pause`, `set_paused` or `emergency_pause`.
+    ContractPaused = 10,
+    /// The contract was unpaused.
+    ContractUnpaused = 11,
+    /// A role was granted, activated, or changed.
+    RoleChanged = 12,
+    /// The contract WASM was replaced.
+    ContractUpgraded = 13,
 }
 
 impl AuditEventType {
@@ -37,6 +52,12 @@ impl AuditEventType {
             AuditEventType::AdminAction => "ADMIN_ACTION",
             AuditEventType::UnauthorizedAttempt => "UNAUTHORIZED_ATTEMPT",
             AuditEventType::DataExported => "DATA_EXPORTED",
+            AuditEventType::VerificationRevoked => "VERIFICATION_REVOKED",
+            AuditEventType::UserRenamed => "USER_RENAMED",
+            AuditEventType::ContractPaused => "CONTRACT_PAUSED",
+            AuditEventType::ContractUnpaused => "CONTRACT_UNPAUSED",
+            AuditEventType::RoleChanged => "ROLE_CHANGED",
+            AuditEventType::ContractUpgraded => "CONTRACT_UPGRADED",
         }
     }
 }

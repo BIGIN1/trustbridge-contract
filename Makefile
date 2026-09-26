@@ -35,6 +35,7 @@ FUTURENET_DRY_RUN ?= false
 .PHONY: help build build-legacy test test-rehearsal fuzz storage-keys-check bindings-golden bench bench-export bench-username bench-double-verify bench-register-budget bench-budget-ci bench-update-samples fmt lint docs docs-check abi check ci clean \
         deploy-testnet deploy-mainnet bindings bindings-build invoke-version require-contract-id \
         invoke-register invoke-lookup invoke-init invoke-stats install-target invoke-extend-ttl \
+        ttl-keeper \
 	export-registry validate-registry dr-test futurenet-smoke assert-build
 
 help: ## Show this help
@@ -424,6 +425,15 @@ futurenet-smoke: ## Deploy and smoke-check Futurenet using pinned RPC and Friend
 	ADMIN=$(ADMIN) SOURCE=$(SOURCE) IDENTITY=$(FUTURENET_IDENTITY) \
 		RPC_URL=$(FUTURENET_RPC_URL) FRIENDBOT_URL=$(FUTURENET_FRIENDBOT_URL) \
 		STELLAR=$(STELLAR) DRY_RUN=$(FUTURENET_DRY_RUN) ./scripts/futurenet_smoke_test.sh
+TTL_KEEPER_BATCH_SIZE ?=
+TTL_KEEPER_DRY_RUN ?= false
+
+ttl-keeper: require-contract-id ## Extend TTL for all registry records — see docs/STORAGE_RENT.md#keeper-implementation (CONTRACT_ID, SOURCE, TTL_KEEPER_DRY_RUN=true to preview)
+	CONTRACT_ID=$(CONTRACT_ID) SOURCE=$(SOURCE) NETWORK=$(NETWORK) STELLAR=$(STELLAR) \
+		./scripts/ttl_keeper.sh \
+		$(if $(filter true,$(TTL_KEEPER_DRY_RUN)),--dry-run,) \
+		$(if $(TTL_KEEPER_BATCH_SIZE),--batch-size $(TTL_KEEPER_BATCH_SIZE),)
+
 export-registry: require-contract-id ## Export full registry to JSON (admin) — see docs/DEPLOYMENT.md#registry-export--import (SOURCE=admin, CONTRACT_ID, EXPORT_FILE)
 	CONTRACT_ID=$(CONTRACT_ID) SOURCE=$(SOURCE) NETWORK=$(NETWORK) OUTPUT_FILE=$(EXPORT_FILE) ./scripts/export_registry.sh
 

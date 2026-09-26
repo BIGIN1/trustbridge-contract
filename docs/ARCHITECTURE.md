@@ -63,8 +63,6 @@ reference and migration guide from manual probing.
 | `Symbol("count")` | `u32` | Total active registrations |
 | `Symbol("vcount")` | `u32` | Count of verified registrations |
 | `Symbol("idx")` | `Vec<String>` | Ordered list of registered usernames (for admin export) |
-| `Symbol("orgidx")` | `Vec<String>` | Ordered list of registered org names |
-| `Symbol("tmidx")` | `Vec<String>` | Ordered list of team keys (org:name format) |
 | `Symbol("ver")` | `(u32, u32, u32)` | Contract schema version tuple |
 
 ### Persistent Storage (per-entry, TTL-extended)
@@ -77,23 +75,30 @@ reference and migration guide from manual probing.
 
 ```rust
 pub struct ContributorRecord {
-    pub stellar_address: Address,
-    pub registered_at: u32,   // ledger timestamp (u32 saves 4 bytes/record)
-    pub verified: bool,       // set by admin after off-chain GitHub check
-    pub entity_type: EntityType, // Personal, Org, or Team
-    pub org_name: Option<String>, // org name for Org/Team entries
-}
-
-pub enum EntityType {
-    Personal = 0,
-    Org = 1,
-    Team = 2,
+    pub stellar_address: Address, // identity address that owns the registration
+    pub payout_address: Address,  // where payouts go; defaults to stellar_address
+    pub registered_at: u32,       // ledger timestamp (u32 saves 4 bytes/record)
+    pub verified: bool,           // set by admin or Verifier after an off-chain check
+    pub is_bot: bool,
 }
 ```
 
+> **Org and Team registrations do not exist** (Issue #398). This section
+> previously documented an `entity_type` / `org_name` pair on the record, an
+> `EntityType` enum, and `orgidx` / `tmidx` indexes. None of it was reachable:
+> the record carried no such fields, no entry point wrote either index, and the
+> index helpers only called each other. The types and keys have been removed
+> rather than completed — documenting a registry surface the contract does not
+> have is worse than not having it, because an integrator reads the docs and
+> builds against an ABI that will never answer.
+>
+> If organisation-scoped registration is wanted later, it should be designed
+> against the current record shape rather than resurrected from the removed
+> stubs, which never had a write path to review.
+
 ### Design Notes
 
-- **`idx` index:** Soroban does not support iterating arbitrary storage keys. The username index enables `get_all_registered()` without scanning the entire ledger.
+- **`idx` index:** Soroban does not support iterating arbitrary storage keys. The username index enables `get_all_registered()` without scanning the entire ledger. It is the *only* index — see the note above on the removed org/team indexes.
 - **`vcount` counter:** Maintained incrementally so `get_stats()` is O(1) rather than scanning all records.
 - **Single-record reads are O(1) (Issue #291):** `has_record`, `get_address`,
   and `get_record_proof` resolve through a direct persistent-key lookup on
