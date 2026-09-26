@@ -25,6 +25,15 @@ policy constants change in `src/storage.rs`.
 | `estimator_inputs_version` | `1` | Storage key layout, `CHUNK_SIZE`, or TTL constants change |
 | `derived_from` | Wave #7 TTL policy + Issue #2 chunked index + instance keys in `src/storage.rs` | Always cite the commit / PR that changed layout |
 
+## CI golden check
+
+CI runs `scripts/test_storage_rent_estimator.sh` to compare the estimator's
+output against `scripts/testdata/storage-rent-estimator.golden.txt` and verify
+the storage chunk-size mismatch warning. If an intentional estimator change
+causes drift, inspect `docs/storage-rent-estimator.inputs.v1.json`, update the
+inputs and corresponding golden output together, then run the script locally
+before committing.
+
 ### Re-computation checklist (layout change)
 
 1. Diff `src/storage.rs` for new/removed keys, `CHUNK_SIZE`, `TTL_THRESHOLD`,

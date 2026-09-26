@@ -641,24 +641,24 @@ fn test_integration_version_migration() {
     let (env, _admin, _user1, _user2, contract_id) = setup_test_env();
 
     env.as_contract(&contract_id, || {
-        assert_eq!(TrustBridgeContract::get_version(env.clone()), (1, 0, 0));
+        assert_eq!(TrustBridgeContract::get_version(env.clone()), (1, 1, 0));
     });
 
     env.mock_all_auths();
     env.as_contract(&contract_id, || {
         assert_eq!(
-            TrustBridgeContract::migrate(env.clone(), (1, 0, 0)),
+            TrustBridgeContract::migrate(env.clone(), (1, 1, 0)),
             Err(ContractError::InvalidVersion)
         );
     });
 
     env.mock_all_auths();
     env.as_contract(&contract_id, || {
-        TrustBridgeContract::migrate(env.clone(), (1, 1, 0)).unwrap();
+        TrustBridgeContract::migrate(env.clone(), (1, 2, 0)).unwrap();
     });
 
     env.as_contract(&contract_id, || {
-        assert_eq!(TrustBridgeContract::get_version(env.clone()), (1, 1, 0));
+        assert_eq!(TrustBridgeContract::get_version(env.clone()), (1, 2, 0));
     });
 }
 

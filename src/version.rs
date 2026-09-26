@@ -6,10 +6,6 @@
 //! the `version` and `is_compatible` contract functions, which the generated
 //! TypeScript bindings package uses to guard against ABI drift.
 
-// Some items here are staged ahead of their call sites: they are covered by
-// this module's own tests but are not yet wired into `lib.rs`.
-#![allow(dead_code)]
-
 /// Contract version information.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Version {
@@ -20,11 +16,9 @@ pub struct Version {
 
 /// First contract version exposing the `batch_verify` entry point.
 ///
-/// `batch_verify` is additive — it introduces a new function without changing
-/// any existing signature — so it lands as a minor bump. Off-chain callers
-/// (dashboard, indexer, the generated TypeScript bindings) should gate on
-/// `Version::supports_batch_verify` rather than assuming the function exists,
-/// since a contract deployed at 1.0.0 will reject the invocation outright.
+/// `batch_verify` is an additive entry point first included in version 1.1.0.
+/// Clients should check this capability before calling it when they may target
+/// deployments that predate the entry point.
 pub const BATCH_VERIFY_MIN_VERSION: Version = Version::new(1, 1, 0);
 
 /// First contract version whose public read functions (`get_address`,
@@ -231,7 +225,11 @@ mod tests {
     #[test]
     fn test_feature_minimum_versions_match_policy_table() {
         let policy = [
-            ("batch_verify", BATCH_VERIFY_MIN_VERSION, Version::new(1, 1, 0)),
+            (
+                "batch_verify",
+                BATCH_VERIFY_MIN_VERSION,
+                Version::new(1, 1, 0),
+            ),
             (
                 "cross_contract_reads",
                 CROSS_CONTRACT_READ_MIN_VERSION,
@@ -383,8 +381,8 @@ mod tests {
 
     #[test]
     fn test_export_paginated_requires_admin_auth() {
-        use soroban_sdk::{testutils::Address as _, Address, Env};
         use crate::TrustBridgeContract;
+        use soroban_sdk::{testutils::Address as _, Address, Env};
 
         let env = Env::default();
         let admin = Address::generate(&env);
@@ -406,6 +404,9 @@ mod tests {
         assert_eq!(auths.len(), 1);
         let (auth_addr, invocation) = auths.get(0).unwrap();
         assert_eq!(auth_addr, admin);
-        assert_eq!(invocation.function.name, soroban_sdk::Symbol::new(&env, "get_registered_paginated"));
+        assert_eq!(
+            invocation.function.name,
+            soroban_sdk::Symbol::new(&env, "get_registered_paginated")
+        );
     }
 }

@@ -5,14 +5,13 @@ version exposed by `version()` and follow semantic versioning: major for
 breaking changes, minor for additive interface changes, and patch for
 compatible corrections.
 
-## [1.1.0] - Unreleased
+## [1.1.0] - 2026-09-26
 
 ### Added
 
-- `RegisteredEvent` now carries `domain: EventDomain`, matching
-  `VerifiedEvent` / `RemovedEvent` (#373). Additive event field.
-- `BotStatusChangedEvent { github_username, is_bot, actor, timestamp, domain }`
-  emitted by `set_bot_status` (#374).
+- Added `batch_verify` to the public contract interface. Clients should gate
+    this call on `is_compatible(1, 1, 0)` when older deployments are supported.
+- New instances now initialize and report contract version `1.1.0`.
 
 ## [1.0.0] - 2026-08-28
 

@@ -353,6 +353,12 @@ the deployed WASM. Clients should call `is_compatible` at startup so a stale
 client fails fast instead of on an unexpected ABI. Full walkthrough:
 [docs/ABI.md](docs/ABI.md#typescript-bindings)
 
+Generated bindings describe the interface of the WASM used to generate them;
+they do not prove that a deployed instance exposes every generated method.
+Check `is_compatible(1, 1, 0)` before using `batch_verify` when supporting older
+deployments. The entry point was added in 1.1.0; bindings generated from a
+newer WASM may expose it even when the deployed contract does not.
+
 > **`remove` and Soroban auth:** Soroban requires an explicit `caller` address argument so the contract can validate which identity signed the transaction. The caller must equal either the registered Stellar address or the contract admin.
 
 ---

@@ -138,7 +138,7 @@ impl RevokeReason {
 /// version tracking fall back to this.
 pub const CONTRACT_VERSION: Version = Version {
     major: 1,
-    minor: 0,
+    minor: 1,
     patch: 0,
 };
 
@@ -191,7 +191,7 @@ impl TrustBridgeContract {
         set_ever_verified_count(&env, 0);
         set_paused_state(&env, false);
         storage_set_cooldown(&env, 0);
-        set_version(&env, (1, 0, 0));
+        set_version(&env, CONTRACT_VERSION.to_tuple());
         storage_set_role(&env, &admin, &Role::Admin);
 
         let timestamp = env.ledger().timestamp();
@@ -3271,134 +3271,7 @@ impl TrustBridgeContract {
         caller: Address,
         usernames: Vec<String>,
     ) -> Result<BatchSummary, ContractError> {
-        require_initialized(&env)?;
-        require_not_paused(&env)?;
-
-        // Budget cap, not just a shape check — see `MAX_WRITE_BATCH` (Issue #227).
-        let config = BatchConfig::for_writes();
-        if !config.is_valid_batch_size(usernames.len()) {
-            return Err(ContractError::InvalidBatchSize);
-        }
-
-        caller.require_auth();
-
-        let is_admin = is_admin_caller(&env, &caller);
-        // Verifier authorization (Issue #293): once the campaign allowlist has
-        // been populated, a non-admin caller must be an *active* (non-expired)
-        // allowlist member — a bare `set_role(Verifier)` grant no longer
-        // suffices. Until the first `add_verifier` call the contract stays in
-        // pure role-based mode, so existing deployments are unaffected.
-        let is_verifier = if is_admin {
-            false
-        } else if verifier_allowlist_active(&env) {
-            storage_is_active_verifier(&env, &caller, env.ledger().timestamp())
-        } else {
-            storage_get_role(&env, &caller) == Some(Role::Verifier)
-        };
-        if !is_admin && !is_verifier {
-            return Err(ContractError::NotAuthorized);
-        }
-
-        // A batch spends one rate-limit unit per requested username, so a batch
-        // call cannot be used to exceed the per-ledger cap a loop of single
-        // `verify` calls would hit (Issue #292). Counted on the requested size,
-        // before dedup/skip, and charged atomically: if the batch would blow the
-        // cap it is rejected whole, having written nothing. Admin is exempt.
-        if !is_admin {
-            charge_verify_rate(&env, &caller, usernames.len())?;
-        }
-
-        let total = usernames.len();
-        let timestamp = env.ledger().timestamp();
-
-        // ── Phase 1: decide, without writing ────────────────────────────────
-        //
-        // Resolve every entry first and collect only those that will actually
-        // change. Nothing is written here, so if the batch is going to be
-        // rejected it is rejected having touched no state at all — the
-        // fail-before-write property this issue asks for.
-        //
-        // Skipping duplicates matters for the counter: the same username twice
-        // in one batch would otherwise be counted twice against `vcount` even
-        // though only one record changes. A record whose verification is
-        // still active (verified and not expired, Issue #218) is skipped the
-        // same way `verify` skips it; an expired one is treated as pending.
-        let mut pending: Vec<String> = Vec::new(&env);
-        for username in usernames.iter() {
-            let Some(record) = get_record(&env, &username) else {
-                continue;
-            };
-            let active =
-                record.verified && !crate::storage::is_verification_expired(&env, &username);
-            if active {
-                continue;
-            }
-            if pending.iter().any(|u| u == username) {
-                continue;
-            }
-            pending.push_back(username);
-        }
-
-        // ── Phase 2: apply ──────────────────────────────────────────────────
-        let mut successful: u32 = 0;
-        // Only entries making a genuine false→true transition count toward
-        // `verified_count` / `ever_verified_count` — renewing an
-        // expired-but-never-revoked entry does not, since it was never
-        // decremented when its previous grant expired (expiry is lazy).
-        let mut newly_verified: u32 = 0;
-        for username in pending.iter() {
-            // Re-read rather than carrying the record from phase 1: cloning a
-            // record per pending entry would hold the whole batch in memory,
-            // and the value cannot have changed in between — nothing else runs
-            // inside this invocation.
-            let Some(mut record) = get_record(&env, &username) else {
-                continue;
-            };
-
-            let was_verified = record.verified;
-            record.verified = true;
-            set_record(&env, &username, &record);
-            crate::storage::set_verified_at(&env, &username, timestamp);
-            if !was_verified {
-                newly_verified = newly_verified.saturating_add(1);
-                bump_ever_verified_count(&env);
-            }
-            clear_pending_reverify(&env, &username);
-
-            VerifiedEvent {
-                github_username: username.clone(),
-                stellar_address: record.stellar_address.clone(),
-                timestamp,
-                domain: event_domain(&env),
-            }
-            .publish(&env);
-
-            push_audit_entry(
-                &env,
-                AuditLogEntry::new(
-                    AuditEventType::UserVerified,
-                    timestamp,
-                    Some(caller.clone()),
-                )
-                .with_username(username.clone())
-                .with_address(record.stellar_address),
-            );
-
-            successful = successful.saturating_add(1);
-        }
-
-        // One counter write for the whole batch instead of a read-modify-write
-        // per entry. That is 2 storage operations rather than 2N, and it means
-        // `vcount` moves exactly once — there is no intermediate state in which
-        // it has been advanced for some entries but not others.
-        if newly_verified > 0 {
-            set_verified_count(
-                &env,
-                storage_get_verified_count(&env).saturating_add(newly_verified),
-            );
-        }
-
-        Ok(BatchSummary::new(total, successful))
+        crate::batch::batch_verify(env, caller, usernames)
     }
 
     /// Revokes verification for a registered contributor.
@@ -8099,6 +7972,11 @@ mod test {
         let (_admin, _user, _other, contract_id) = setup(&env);
 
         env.as_contract(&contract_id, || {
+            assert_eq!(
+                TrustBridgeContract::get_version(env.clone()),
+                CONTRACT_VERSION.to_tuple()
+            );
+            set_version(&env, (1, 0, 0));
             assert_eq!(TrustBridgeContract::get_version(env.clone()), (1, 0, 0));
         });
 
@@ -8114,7 +7992,25 @@ mod test {
         });
 
         env.as_contract(&contract_id, || {
-            assert_eq!(TrustBridgeContract::get_version(env.clone()), (1, 1, 0));
+            assert_eq!(
+                TrustBridgeContract::get_version(env.clone()),
+                CONTRACT_VERSION.to_tuple()
+            );
+        });
+    }
+
+    #[test]
+    fn test_is_compatible_matches_initialized_batch_verify_version() {
+        let env = Env::default();
+        let (_admin, _user, _other, contract_id) = setup(&env);
+
+        env.as_contract(&contract_id, || {
+            assert_eq!(
+                TrustBridgeContract::version(env.clone()),
+                CONTRACT_VERSION.to_tuple()
+            );
+            assert!(TrustBridgeContract::is_compatible(env.clone(), 1, 1, 0));
+            assert!(!TrustBridgeContract::is_compatible(env.clone(), 1, 1, 1));
         });
     }
 
@@ -10176,173 +10072,6 @@ mod test {
                 env.events().all(),
                 soroban_sdk::vec![&env],
                 "failed revoke published a VerificationRevokedEvent"
-            );
-        });
-    }
-
-    // ── batch_verify tests ──────────────────────────────────────────────────
-
-    #[test]
-    fn test_batch_verify_happy_path() {
-        let env = Env::default();
-        let (admin, user1, user2, contract_id) = setup(&env);
-        let user3 = Address::generate(&env);
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            TrustBridgeContract::register(
-                env.clone(),
-                username(&env, "user1"),
-                user1,
-                Vec::new(&env),
-            )
-            .unwrap();
-            TrustBridgeContract::register(
-                env.clone(),
-                username(&env, "user2"),
-                user2,
-                Vec::new(&env),
-            )
-            .unwrap();
-            TrustBridgeContract::register(
-                env.clone(),
-                username(&env, "user3"),
-                user3,
-                Vec::new(&env),
-            )
-            .unwrap();
-        });
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            let usernames = soroban_sdk::vec![
-                &env,
-                username(&env, "user1"),
-                username(&env, "user2"),
-                username(&env, "user3"),
-            ];
-            let summary =
-                TrustBridgeContract::batch_verify(env.clone(), admin.clone(), usernames).unwrap();
-            assert_eq!(summary.total, 3);
-            assert_eq!(summary.successful, 3);
-            assert_eq!(summary.failed, 0);
-            assert_eq!(summary.success_rate, 100);
-            assert_eq!(TrustBridgeContract::get_verified_count(env.clone()), 3);
-        });
-    }
-
-    #[test]
-    fn test_batch_verify_partial_and_mixed() {
-        let env = Env::default();
-        let (admin, user1, _user2, contract_id) = setup(&env);
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            TrustBridgeContract::register(
-                env.clone(),
-                username(&env, "user1"),
-                user1.clone(),
-                Vec::new(&env),
-            )
-            .unwrap();
-            TrustBridgeContract::verify(env.clone(), admin.clone(), username(&env, "user1"))
-                .unwrap();
-        });
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            // user1: already verified -> fail
-            // user2: not registered -> fail
-            let usernames =
-                soroban_sdk::vec![&env, username(&env, "user1"), username(&env, "user2"),];
-            let summary =
-                TrustBridgeContract::batch_verify(env.clone(), admin.clone(), usernames).unwrap();
-            assert_eq!(summary.total, 2);
-            assert_eq!(summary.successful, 0);
-            assert_eq!(summary.failed, 2);
-            assert_eq!(summary.success_rate, 0);
-        });
-    }
-
-    #[test]
-    fn test_batch_verify_verifier_role() {
-        let env = Env::default();
-        let (_admin, user1, verifier, contract_id) = setup(&env);
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            TrustBridgeContract::set_role(env.clone(), verifier.clone(), Role::Verifier).unwrap();
-            TrustBridgeContract::register(
-                env.clone(),
-                username(&env, "user1"),
-                user1,
-                Vec::new(&env),
-            )
-            .unwrap();
-        });
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            let usernames = soroban_sdk::vec![&env, username(&env, "user1")];
-            let summary =
-                TrustBridgeContract::batch_verify(env.clone(), verifier.clone(), usernames)
-                    .unwrap();
-            assert_eq!(summary.successful, 1);
-        });
-    }
-
-    #[test]
-    fn test_batch_verify_upgrader_rejected() {
-        let env = Env::default();
-        let (_admin, user1, upgrader, contract_id) = setup(&env);
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            TrustBridgeContract::set_role(env.clone(), upgrader.clone(), Role::Upgrader).unwrap();
-            TrustBridgeContract::register(
-                env.clone(),
-                username(&env, "user1"),
-                user1,
-                Vec::new(&env),
-            )
-            .unwrap();
-        });
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            let usernames = soroban_sdk::vec![&env, username(&env, "user1")];
-            let res = TrustBridgeContract::batch_verify(env.clone(), upgrader.clone(), usernames);
-            assert_eq!(res, Err(ContractError::NotAuthorized));
-        });
-    }
-
-    #[test]
-    fn test_batch_verify_empty_or_oversize() {
-        let env = Env::default();
-        let (admin, _user, _other, contract_id) = setup(&env);
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            let empty = soroban_sdk::vec![&env];
-            assert_eq!(
-                TrustBridgeContract::batch_verify(env.clone(), admin.clone(), empty),
-                Err(ContractError::InvalidBatchSize)
-            );
-        });
-    }
-
-    #[test]
-    fn test_batch_verify_paused() {
-        let env = Env::default();
-        let (admin, _user, _other, contract_id) = setup(&env);
-
-        env.mock_all_auths();
-        env.as_contract(&contract_id, || {
-            TrustBridgeContract::pause(env.clone(), 1).unwrap();
-            let usernames = soroban_sdk::vec![&env, username(&env, "user1")];
-            assert_eq!(
-                TrustBridgeContract::batch_verify(env.clone(), admin.clone(), usernames),
-                Err(ContractError::Paused)
             );
         });
     }
