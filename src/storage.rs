@@ -112,9 +112,6 @@ pub const CHALLENGE_KEY: Symbol = symbol_short!("chllng");
 /// prove GitHub ownership off-chain before the name is freed.
 pub const DEFAULT_CHALLENGE_DELAY_SECS: u64 = 172_800; // 48 hours
 
-/// Key for the pause reason code (Issue #211).
-pub const PAUSE_REASON_KEY: Symbol = symbol_short!("p_reason");
-
 /// Key for the reserved username set (Issue #213).
 pub const RESERVED_KEY: Symbol = symbol_short!("reserved");
 
