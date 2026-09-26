@@ -25,6 +25,8 @@ PKG_MANAGER  ?= pnpm
 EXPORT_FILE ?= registry-export-$(NETWORK).json
 ADMIN_SOURCE ?=
 WASM_SIZE_LIMIT ?= 204800
+# Set to 1 (as CI does) to fail `wasm-hash-pin` while wasm-hash.pin is still PLACEHOLDER.
+WASM_HASH_STRICT ?= 0
 FUTURENET_RPC_URL ?= https://rpc-futurenet.stellar.org
 FUTURENET_FRIENDBOT_URL ?= https://friendbot-futurenet.stellar.org
 FUTURENET_IDENTITY ?= $(SOURCE)
@@ -197,7 +199,7 @@ wasm-size: build ## Report release WASM size and check against budget (WASM_SIZE
 		echo "PASS: WASM size is within budget."; \
 	fi
 
-check: fmt lint test build docs-check wasm-size ## Run full local quality gate
+check: fmt lint test build docs-check wasm-size wasm-hash-pin ## Run full local quality gate (mirrors CI)
 
 wasm-hash-pin: build ## Verify release WASM hash matches wasm-hash.pin (mirrors CI hash gate)
 	@if [ -f $(WASM_V1) ]; then WASM=$(WASM_V1); elif [ -f $(WASM_LEGACY) ]; then WASM=$(WASM_LEGACY); else echo "ERROR: No WASM artifact found. Run 'make build' first."; exit 1; fi; \
@@ -206,6 +208,7 @@ wasm-hash-pin: build ## Verify release WASM hash matches wasm-hash.pin (mirrors 
 	PINNED=$$(grep -v '^#' wasm-hash.pin | grep -v '^$$' | tr -d '[:space:]'); \
 	if [ "$$PINNED" = "PLACEHOLDER" ]; then \
 		echo "WARNING: wasm-hash.pin contains PLACEHOLDER — run 'make wasm-hash-update' to pin."; \
+		if [ "$(WASM_HASH_STRICT)" = "1" ]; then echo "ERROR: WASM_HASH_STRICT=1 requires a real pinned hash."; exit 1; fi; \
 	elif [ "$$ACTUAL" != "$$PINNED" ]; then \
 		echo "ERROR: WASM hash mismatch! Expected: $$PINNED  Actual: $$ACTUAL"; \
 		echo "Run 'make wasm-hash-update' if this change is intentional."; \
@@ -221,7 +224,8 @@ wasm-hash-update: build ## Recompute and update wasm-hash.pin with the current b
 	sed -i "s/^[a-f0-9]\{64\}$$/$$HASH/" wasm-hash.pin; \
 	echo "Updated wasm-hash.pin to $$HASH"
 
-ci: check ## Alias for CI-equivalent checks (fmt + lint + test + build + docs + wasm-size)
+ci: ## Alias for CI-equivalent checks (fmt + lint + test + build + docs + wasm-size + strict hash pin)
+	$(MAKE) check WASM_HASH_STRICT=1
 
 clean: ## Remove build artifacts
 	cargo clean

@@ -585,6 +585,17 @@ artifact hash does not match the pinned value, preventing silent deploy of a wro
 2. The _Compute and verify WASM hash pin_ CI step runs `sha256sum` on the artifact.
 3. The computed hash is compared to the value in `wasm-hash.pin`.
 4. A mismatch fails CI with clear instructions to update the pin.
+5. CI runs the gate with `WASM_HASH_STRICT=1`, so an unpinned `PLACEHOLDER` value also
+   fails. The computed hash is written to the job summary so it can be copied into the pin.
+
+### Operator flow for (re)pinning
+
+1. Land the contract change and wait for a green `make build` (locally or in CI).
+2. Run `make wasm-hash-update` on the release commit (or copy the SHA-256 from the CI job
+   summary into `wasm-hash.pin`, replacing the previous hash / `PLACEHOLDER` line).
+3. Run `make wasm-hash-pin WASM_HASH_STRICT=1` — it must print `OK: WASM hash matches pin.`
+4. Commit `wasm-hash.pin` in the same PR as the WASM-changing code and include the
+   before/after hashes in the PR description.
 
 ### Local verification
 

@@ -1356,6 +1356,7 @@ Sets the bot-account status flag on a contributor record.
 | **Auth** | `caller` must sign; must be admin or registrant |
 | **Mutates** | Yes |
 | **Errors** | `NotInitialized`, `NotRegistered`, `NotAuthorized` |
+| **Events** | `BotStatusChangedEvent` |
 
 ```bash
 # Registrant setting own bot flag
@@ -1681,8 +1682,23 @@ duplicate deliveries of `RegisteredEvent` / `VerifiedEvent` /
 
 ```
 topics: ["registered_event", github_username]
-data:   { stellar_address, timestamp, sponsor: Option<Address> }
+data:   { stellar_address, timestamp, sponsor: Option<Address>, domain: EventDomain }
 ```
+
+`domain` was added in 1.1.0 (Issue #373) for parity with `VerifiedEvent` /
+`RemovedEvent`; indexers can now attribute registrations to a deployment
+without out-of-band configuration.
+
+### BotStatusChangedEvent
+
+```
+topics: ["bot_status_changed_event", github_username]
+data:   { is_bot: bool, actor: Address, timestamp, domain: EventDomain }
+```
+
+Emitted by `set_bot_status` (Issue #374) every time the `is_bot` flag is
+written. `actor` is the admin or registrant that made the call. Covered by
+`test_set_bot_status_emits_event`.
 
 ### RemovedEvent
 

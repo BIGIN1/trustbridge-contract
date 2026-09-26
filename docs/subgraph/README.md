@@ -20,7 +20,7 @@ the contract does not emit.
 
 | Contract event | Topic symbol | Payload fields (from `src/events.rs`) | Entity |
 |---|---|---|---|
-| `RegisteredEvent` | `registered_event` | `github_username` (topic), `stellar_address`, `timestamp`, `sponsor: Option<Address>` | `RegisteredEvent` |
+| `RegisteredEvent` | `registered_event` | `github_username` (topic), `stellar_address`, `timestamp`, `sponsor: Option<Address>`, `domain` | `RegisteredEvent` |
 | `VerifiedEvent` | `verified_event` | `github_username` (topic), `stellar_address`, `timestamp`, `domain` | `VerifiedEvent` |
 | `VerificationRevokedEvent` | `verification_revoked_event` | `github_username` (topic), `stellar_address`, `timestamp`, `reason_code`, `domain` | `VerificationRevokedEvent` |
 | `RemovedEvent` | `removed_event` | `github_username` (topic), `stellar_address`, `timestamp`, `domain` | `RemovedEvent` |
@@ -34,12 +34,10 @@ the contract does not emit.
 
 Notes and gotchas:
 
-- **`domain` is not on every event.** Only `VerifiedEvent`, `RemovedEvent`,
-  `VerificationRevokedEvent`, and the three challenge events carry `EventDomain`
-  (Issue #226). `RegisteredEvent`, `RenamedEvent`, and the three rotation events
-  do **not** — the schema reflects this (no `domain` field there). Take
-  `contractId` / `networkId` for those from the deployment the subgraph is
-  pointed at.
+- **All three events carry `domain`.** `RegisteredEvent` gained `EventDomain`
+  in 1.1.0 (Issue #373), matching `VerifiedEvent` and `RemovedEvent` (Issue
+  #226). Registrations emitted by pre-1.1.0 WASM have no `domain`; fall back to
+  the deployment the subgraph is pointed at for those.
 - **`EventDomain`** = `{ contract_id: Address, network_id: BytesN<32>,
   contract_version: (u32,u32,u32), domain_version: u32 }`. Mapped as an embedded
   type, not a queryable entity.

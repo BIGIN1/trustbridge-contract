@@ -275,7 +275,15 @@
         "\"registered_event\"",
         "github_username"
       ],
-      "data": "{ stellar_address, timestamp, sponsor: Option<Address> }"
+      "data": "{ stellar_address, timestamp, sponsor: Option<Address>, domain: EventDomain }"
+    },
+    {
+      "name": "BotStatusChangedEvent",
+      "topics": [
+        "\"bot_status_changed_event\"",
+        "github_username"
+      ],
+      "data": "{ is_bot, actor, timestamp, domain: EventDomain }"
     },
     {
       "name": "RemovedEvent",

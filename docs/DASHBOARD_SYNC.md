@@ -14,13 +14,18 @@ Key events to watch:
 
 | Event | Topic symbol | Key data fields |
 |---|---|---|
-| `RegisteredEvent` | `registered_event` | `stellar_address`, `timestamp` |
+| `RegisteredEvent` | `registered_event` | `stellar_address`, `timestamp`, `sponsor`, `domain` |
+| `BotStatusChangedEvent` | `bot_status_changed_event` | `is_bot`, `actor`, `timestamp`, `domain` |
 | `VerifiedEvent` | `verified_event` | `stellar_address`, `timestamp` |
 | `VerificationRevokedEvent` | `verification_revoked_event` | `stellar_address`, `timestamp` |
 | `RemovedEvent` | `removed_event` | `stellar_address`, `timestamp` |
 | `UpgradedEvent` | `upgraded_event` | `version`, `timestamp` |
 | `PausedEvent` / `UnpausedEvent` | `paused_event` / `unpaused_event` | `timestamp` |
 | `RoleGrantedEvent` / `RoleRevokedEvent` | `role_granted_event` / `role_revoked_event` | `role`, `admin`, `timestamp` / `admin`, `timestamp` |
+
+> **Bot flag:** update the dashboard's `is_bot` column from `BotStatusChangedEvent`
+> instead of re-exporting the registry; the latest event per `github_username`
+> (by ledger order) is authoritative.
 
 > **Note:** `RoleRevokedEvent` does **not** include the `role` field in its data
 > payload. If your indexer needs to know which role was revoked, correlate the
