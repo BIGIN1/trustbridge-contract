@@ -20,6 +20,7 @@ Related docs: [README](../README.md) · [ARCHITECTURE](ARCHITECTURE.md) · [DEPL
 | Admin storage mutated after init | No public setter writes `ADMIN_KEY` — only `initialize` does, gated by `AlreadyInitialized` (Issue #97) |
 | Malformed or oversized username input | `InvalidUsername` error, checked before auth and before any write |
 | Unicode / homoglyph username spoofing | Byte-wise ASCII validation rejects all non-ASCII bytes; see **Unicode Rejection Policy** section |
+| Registering the zero/burn address (reachable under `mock_all_auths` / sandboxes that skip `require_auth`) | `is_zero_address` guard in `register` / `register_sponsored` / `request_address_rotation` returns `ZeroAddress` before any write — pinned by `tests/zero_address.rs` against current SDK mock-auth APIs; removing the guard fails those tests (Issue #300) |
 | Consecutive-hyphen username bypass | `InvalidUsername` error — consecutive hyphens now enforced on-chain |
 | Counter drift from rejected calls | Invariant property fuzzing, see [REGISTRY_INVARIANTS](REGISTRY_INVARIANTS.md) |
 | Stale trust surviving a remove → re-register cycle (a new registrant inheriting the previous owner's verified status or address binding) | `remove` unconditionally clears the stored record; `register` on a removed username always starts a fresh, unverified record — see [Re-registration After Remove](#re-registration-after-remove) (Issue #93) |
