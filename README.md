@@ -411,3 +411,6 @@ Copyright © 2026 [Stellar-TrustBridge](https://github.com/Stellar-TrustBridge)
 
 <!-- handsoff-issue-361 -->
 - #361: Add missing ContractError variants used by lib.rs
+
+<!-- handsoff-issue-367 -->
+- #367: Align ContributorRecord fields with callers
