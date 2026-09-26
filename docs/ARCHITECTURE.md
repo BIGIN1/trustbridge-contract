@@ -40,7 +40,7 @@ reference and migration guide from manual probing.
 | `src/events.rs` | Soroban contract events with topics |
 | `src/error.rs` | Typed error enum (`ContractError`) and off-chain retry classification (`ErrorCategory`) |
 | `src/audit.rs` | Append-only audit-log entry type and helpers |
-| `src/batch.rs` | Batch-operation config and size limits (`BatchConfig`) |
+| `src/batch.rs` | Batch verification implementation, configuration, limits, and tests |
 | `src/domain.rs` | `EventDomain` (contract id, network id, version) attached to every event |
 | `src/utils.rs` | Username validation and other pure helpers |
 | `src/version.rs` | Contract version type, compatibility checks, cross-contract read gating |
