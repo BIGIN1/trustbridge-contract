@@ -414,3 +414,6 @@ Copyright © 2026 [Stellar-TrustBridge](https://github.com/Stellar-TrustBridge)
 
 <!-- handsoff-issue-367 -->
 - #367: Align ContributorRecord fields with callers
+
+<!-- handsoff-issue-370 -->
+- #370: Implement public admin-transfer entry points documented in ABI
