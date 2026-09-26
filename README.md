@@ -403,3 +403,8 @@ make check    # Run the full local quality gate before submitting
 This project is licensed under the [MIT License](LICENSE).
 
 Copyright © 2026 [Stellar-TrustBridge](https://github.com/Stellar-TrustBridge)
+
+## Handsoff notes
+
+<!-- handsoff-issue-307 -->
+- #307: Formal audit prep pack: threat-model tests as code from SECURITY.md
