@@ -207,10 +207,31 @@ struct ChallengeRecord {
 | 18 | `NoChallengeActive` | `cancel_challenge` or `complete_challenge` called with no active challenge |
 | 19 | `ChallengeNotResolvable` | `complete_challenge` called before the delay has elapsed |
 | 20 | `ChallengeActive` | `register` attempted while a challenge is active on the username |
-| 21 | `NetworkMismatch` | Instance state was initialized on a different network than the one executing (Issue #231) |
+| 21 | `InvalidPauseReason` | `pause` / `unpause` / `set_paused` given an unrecognized reason code |
+| 22 | `AlreadyReserved` | `add_reserved` for a username already on the reserved list |
+| 23 | `NotReserved` | `remove_reserved` for a username not on the reserved list |
+| 24 | `UsernameReserved` | `register` for a username on the reserved list |
+| 25 | `ReservedListFull` | Reserved list has reached its maximum size |
+| 26 | `AdminTransferPending` | `propose_admin_transfer` while a transfer is already pending |
+| 27 | `AdminTransferDelayActive` | `execute_admin_transfer` before the delay has elapsed |
+| 28 | `NoPendingAdminTransfer` | `execute_admin_transfer` with no pending proposal |
+| 29 | `AttestationRequired` | `upgrade` without an attestation while attestation-required mode is on |
+| 30 | `NetworkMismatch` | Instance state was initialized on a different network than the one executing (Issue #231 / #401) |
 | 31 | `VerifierAllowlistFull` | `add_verifier` would exceed the `MAX_VERIFIERS` cap (Issue #293) |
 | 32 | `VerifierNotAllowlisted` | `remove_verifier` for an address not on the allowlist (Issue #293) |
 | 33 | `VerifierExpiryInPast` | `add_verifier` given a non-zero `expires_at` not in the future (Issue #293) |
+| 34 | `NoPendingRoleGrant` | `activate_role` / `cancel_role_grant` with no pending grant (Issue #220) |
+| 35 | `RoleGrantNotReady` | `activate_role` before the grant's timelock elapsed (Issue #220) |
+| 36 | `ProvenanceMissing` | `assert_build` / `set_provenance_digests` before any provenance record exists (Issue #225) |
+| 37 | `ProvenanceMismatch` | `assert_build` given a hash that does not match stored provenance (Issue #225) |
+
+> **`NetworkMismatch` moved from 21 to 30.** This table previously listed it at
+> code 21 while the enum had `InvalidPauseReason` there and no `NetworkMismatch`
+> variant at all — a client built from these docs would have decoded a bad
+> pause-reason as a network mismatch (Issue #402). Code 30 was an unused gap, so
+> filling it leaves every other discriminant untouched and is not an ABI break.
+> `scripts/check_error_codes.sh` now fails CI if this table, `src/error.rs`, and
+> `abi/contract_error_codes.golden` drift apart again.
 
 `ContractError::from_code(u32)` maps every code in this table back to the typed
 variant and returns `None` for any unrecognized code. Every code round-trips
@@ -258,6 +279,11 @@ it. `ContractError::is_retryable()` is the shorthand for `category() == Retry`.
 | `UsernameReserved` | `Fatal` | Username is on the reserved list |
 | `ReservedListFull` | `Fatal` | Reserved list at capacity |
 | `AdminTransferPending` / `NoPendingAdminTransfer` | `Fatal` | Admin-transfer state precondition not met |
+| `NetworkMismatch` | `Fatal` | The executing network does not change between attempts |
+| `VerifierAllowlistFull` / `VerifierNotAllowlisted` / `VerifierExpiryInPast` | `Fatal` | Verifier-allowlist precondition not met |
+| `NoPendingRoleGrant` | `Fatal` | No grant to activate or cancel |
+| `RoleGrantNotReady` | `Retry` | Succeeds once the grant timelock elapses |
+| `ProvenanceMissing` / `ProvenanceMismatch` | `Fatal` | Nothing deployed yet, or the hash does not match |
 
 Completeness is enforced by `src/error.rs` unit tests
 (`every_error_code_has_a_category`, `retryable_errors_are_the_transient_set`,
@@ -2595,7 +2621,7 @@ Admin-only. Tags an untagged instance with the network it is running on, for
 instances deployed before this field existed.
 
 Deliberately **not** a re-tagging entry point: if a tag is already present and
-disagrees with the live network, this returns `NetworkMismatch` (code 21) rather
+disagrees with the live network, this returns `NetworkMismatch` (code 30) rather
 than overwriting it. An entry point that could rewrite the tag would defeat the
 check entirely. Re-adopting the *same* network is a no-op and succeeds, so a
 migration script can call it unconditionally.
@@ -2604,7 +2630,7 @@ migration script can call it unconditionally.
 
 `require_initialized` — which every gated entry point already calls — now also
 compares the recorded network id against `env.ledger().network_id()`. A
-mismatch returns `NetworkMismatch` (code 21) from **every** gated function,
+mismatch returns `NetworkMismatch` (code 30) from **every** gated function,
 read or write.
 
 An instance with no recorded tag is allowed through, so contracts deployed

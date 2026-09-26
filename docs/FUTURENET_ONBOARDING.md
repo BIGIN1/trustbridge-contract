@@ -327,7 +327,7 @@ copy-pasted from a testnet runbook into a mainnet deploy. There is nothing to
 pass and nothing to get wrong.
 
 `require_initialized`, which every gated entry point already calls, compares the
-recorded id against the live one. A mismatch returns `NetworkMismatch` (code 21)
+recorded id against the live one. A mismatch returns `NetworkMismatch` (code 30)
 from every gated function, read or write — the contract fails closed rather than
 serving records that belong to another network.
 

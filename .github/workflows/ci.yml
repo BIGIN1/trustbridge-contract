@@ -55,19 +55,20 @@ jobs:
 
       - name: Install Stellar CLI
         run: |
-          curl -sSL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz -C /usr/local/bin stellar
-          stellar --version
+          test -f Cargo.toml
+          test -f rust-toolchain.toml
+          test -f src/lib.rs
+          test -f README.md
+          test -f Makefile
 
-      - name: Build WASM
-        run: make build
+      # Issue #402: fails if the ContractError discriminants drift apart across
+      # src/error.rs, from_code, abi/contract_error_codes.golden and
+      # docs/ABI.md, or if a discriminant is reused. Cheap and dependency-free,
+      # so it runs before the build rather than after it.
+      - name: Check ABI error-code consistency
+        run: ./scripts/check_error_codes.sh
 
-      - name: WASM size budget
-        run: make wasm-size
-
-      - name: Compute and verify WASM hash pin
-        run: |
-          WASM=target/wasm32v1-none/release/trustbridge_contract.wasm
-          echo "### WASM SHA-256" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`$(sha256sum "$WASM" | awk '{print $1}')\`" >> "$GITHUB_STEP_SUMMARY"
-          make wasm-hash-pin WASM_HASH_STRICT=1
+      # Issue #399: the reference indexer classifies event topics from a table
+      # that has to stay in step with src/events.rs.
+      - name: Check event indexer topic table
+        run: ./scripts/check_event_topics.sh

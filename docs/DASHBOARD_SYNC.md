@@ -423,3 +423,34 @@ request/response shape, cursor semantics, and pause-availability are
 unchanged. This note exists so a future audit of read-path costs can
 confirm the public path stays chunk-backed rather than regressing back to
 an instance-storage scan.
+
+---
+
+## Event topic classification (Issue #399)
+
+`scripts/event_indexer.sh` is the reference indexer for this guide. Beyond
+tailing events into JSONL with a resume cursor, it labels each event so a
+dashboard can group and filter without decoding XDR:
+
+| Field | Meaning |
+|-------|---------|
+| `topic_symbol` | Decoded first topic, e.g. `verification_revoked_event` |
+| `event_kind` | Stable short name, e.g. `verification_revoked` |
+| `category` | `registry`, `attest`, `challenge`, `role`, `admin`, `upgrade`, or `batch` |
+
+`#[contractevent]` derives the first topic from the struct name in snake_case,
+so every `pub struct FooEvent` in `src/events.rs` emits topic `foo_event`. The
+indexer's `TOPIC_TABLE` maps those symbols to the fields above.
+
+**An unrecognised topic is labelled `unknown` and still recorded.** An indexer
+pointed at a contract newer than itself must not drop events it cannot name —
+that would lose the stream exactly when an operator needs it. Treat a rising
+count of `event_kind == "unknown"` as the signal that the indexer is behind the
+contract, and update `TOPIC_TABLE`.
+
+`scripts/check_event_topics.sh` (run in CI) fails if the table and
+`src/events.rs` disagree, and replays the canned sample twice to assert the
+resume path appends nothing the second time.
+
+See [scripts/README.md](../scripts/README.md#topic-classification-issue-399)
+for the full field reference and local verification steps.
