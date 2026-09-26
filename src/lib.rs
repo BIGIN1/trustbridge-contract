@@ -51,18 +51,16 @@ pub use events::{
     // Staged WASM (Issue #300)
     WasmStagedEvent,
 };
-pub use events::{RegisteredEvent, RemovedEvent, VerifiedEvent};
 pub use multisig_upgrade::{UpgradeProposal, MAX_UPGRADE_SIGNERS};
 pub use oracle_proof::{
     get_oracle_allowlist, set_oracle_allowlist, verify_with_proof, OracleProof,
 };
 pub use staged_wasm::StagedWasm;
 pub use storage::{
-    ChallengeRecord, ContributorRecord, ExportPage, HealthSnapshot, PauseReason, PendingRoleGrant,
-    Role, Stats, VerificationConfig, VerifierAllowEntry, WasmAttestation, WasmProvenance,
-    MAX_VERIFIERS,
+    ChallengeRecord, ContributorRecord, EntityType, ExportPage, HealthSnapshot, PauseReason,
+    PendingRoleGrant, Role, Stats, VerificationConfig, VerifierAllowEntry, WasmAttestation,
+    WasmProvenance, MAX_VERIFIERS,
 };
-pub use storage::{ContributorRecord, EntityType, Stats};
 pub use version::Version;
 
 use crate::storage::get_public_paginated_internal;
