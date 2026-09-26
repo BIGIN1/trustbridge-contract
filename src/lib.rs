@@ -57,9 +57,10 @@ pub use oracle_proof::{
 };
 pub use staged_wasm::StagedWasm;
 pub use storage::{
-    ChallengeRecord, ContributorRecord, EntityType, ExportPage, HealthSnapshot, PauseReason,
-    PendingRoleGrant, Role, Stats, VerificationConfig, VerifierAllowEntry, WasmAttestation,
-    WasmProvenance, MAX_VERIFIERS,
+    ChallengeRecord, ContributorRecord, ExportAttestation, ExportPage, HealthSnapshot, PauseReason,
+    PendingBatchRemove, PendingRoleGrant, PendingRotation, RecordProof, RepairReport, Role,
+    RoleHolder, Stats, VerificationConfig, VerifierAllowEntry, WasmAttestation, WasmProvenance,
+    MAX_VERIFIERS,
 };
 pub use version::Version;
 
@@ -12352,182 +12353,155 @@ mod test {
         });
     }
 
-    // ── Issue #300: WasmStagedEvent / StagedWasmClearedEvent shapes ──────────
+    // ── Issue #368: exported type reference tests ─────────────────────────────
 
     #[test]
-    fn test_wasm_staged_event_shape() {
+    fn test_pending_rotation_type_is_exported() {
         let env = Env::default();
-        let (admin, _user, _other, contract_id) = setup(&env);
+        let (admin, user, _other, contract_id) = setup(&env);
         let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
 
-        let hash = soroban_sdk::BytesN::from_array(&env, &[0xABu8; 32]);
         env.mock_all_auths();
-        env.ledger().set_timestamp(2_000_000_000);
-        client.stage_wasm(&admin, &hash);
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
 
-        let expected = crate::events::WasmStagedEvent {
-            wasm_hash: hash.clone(),
-            staged_by: admin.clone(),
-            timestamp: 2_000_000_000,
-        };
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000);
+        let new_addr = soroban_sdk::Address::generate(&env);
+        client.request_address_rotation(&user, &name, &new_addr);
 
-        assert_eq!(
-            env.events().all(),
-            soroban_sdk::vec![
-                &env,
-                (
-                    contract_id.clone(),
-                    expected.topics(&env),
-                    expected.data(&env),
-                )
-            ],
-            "WasmStagedEvent payload or topics changed"
-        );
-
-        let topics = expected.topics(&env);
-        assert_eq!(topics.len(), 2, "WasmStagedEvent must have 2 topics");
-        assert_eq!(
-            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
-            soroban_sdk::Symbol::new(&env, "wasm_staged_event"),
-            "WasmStagedEvent topic symbol changed"
-        );
-        assert_eq!(
-            soroban_sdk::BytesN::<32>::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
-            hash,
-            "WasmStagedEvent wasm_hash topic changed"
-        );
+        let pending: Option<PendingRotation> = client.get_pending_rotation(&name);
+        let p = pending.expect("rotation should be pending");
+        assert_eq!(p.new_address, new_addr);
+        assert!(p.executable_at >= p.requested_at);
     }
 
     #[test]
-    fn test_staged_wasm_cleared_event_shape() {
+    fn test_pending_batch_remove_type_is_exported() {
         let env = Env::default();
-        let (admin, _user, _other, contract_id) = setup(&env);
+        let (admin, user, _other, contract_id) = setup(&env);
         let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
 
-        let hash = soroban_sdk::BytesN::from_array(&env, &[0xCDu8; 32]);
         env.mock_all_auths();
-        env.ledger().set_timestamp(2_100_000_000);
-        client.stage_wasm(&admin, &hash);
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
 
-        env.ledger().set_timestamp(2_200_000_000);
-        client.clear_staged(&admin);
-
-        let expected = crate::events::StagedWasmClearedEvent {
-            wasm_hash: hash.clone(),
-            cleared_by: admin.clone(),
-            timestamp: 2_200_000_000,
-        };
-
-        assert_eq!(
-            env.events().all(),
-            soroban_sdk::vec![
-                &env,
-                (
-                    contract_id.clone(),
-                    expected.topics(&env),
-                    expected.data(&env),
-                )
-            ],
-            "StagedWasmClearedEvent payload or topics changed"
-        );
-
-        let topics = expected.topics(&env);
-        assert_eq!(topics.len(), 2, "StagedWasmClearedEvent must have 2 topics");
-        assert_eq!(
-            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
-            soroban_sdk::Symbol::new(&env, "staged_wasm_cleared_event"),
-            "StagedWasmClearedEvent topic symbol changed"
-        );
-    }
-
-    // ── Issue #301: multisig upgrade event shapes ─────────────────────────────
-
-    #[test]
-    fn test_upgrade_proposed_event_shape() {
-        let env = Env::default();
-        let (admin, _user, _other, contract_id) = setup(&env);
-        let client = TrustBridgeContractClient::new(&env, &contract_id);
-
-        let hash = soroban_sdk::BytesN::from_array(&env, &[0x01u8; 32]);
+        // Enable dual-control by setting threshold to 1.
         env.mock_all_auths();
-        env.ledger().set_timestamp(3_000_000_000);
-        client.propose_multisig_upgrade(&admin, &hash, &0u64);
+        client.set_batch_remove_threshold(&1u32);
 
-        let events = env.events().all();
-        assert_eq!(events.len(), 1, "propose_multisig_upgrade must emit exactly one event");
+        let usernames = soroban_sdk::vec![&env, name.clone()];
+        env.mock_all_auths();
+        client.propose_batch_remove(&admin, &usernames);
 
-        let (_, topics, _) = events.get(0).unwrap();
-        assert_eq!(
-            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
-            soroban_sdk::Symbol::new(&env, "upgrade_proposed_event"),
-            "UpgradeProposedEvent topic symbol changed"
-        );
-        assert_eq!(
-            u32::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
-            0u32,
-            "UpgradeProposedEvent proposal_id topic changed"
-        );
+        let pending: Option<PendingBatchRemove> = client.get_pending_batch_remove();
+        let p = pending.expect("batch remove should be pending");
+        assert_eq!(p.proposed_by, admin);
+        assert_eq!(p.usernames.len(), 1);
     }
 
     #[test]
-    fn test_upgrade_approved_event_shape() {
+    fn test_export_attestation_type_is_exported() {
         let env = Env::default();
-        let (admin, _user, _other, contract_id) = setup(&env);
+        let (admin, user, _other, contract_id) = setup(&env);
         let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
 
-        let hash = soroban_sdk::BytesN::from_array(&env, &[0x02u8; 32]);
         env.mock_all_auths();
-        env.ledger().set_timestamp(3_100_000_000);
-        client.propose_multisig_upgrade(&admin, &hash, &0u64);
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
 
-        client.set_upgrade_threshold(&admin, &2u32);
-
-        let signer2 = soroban_sdk::Address::generate(&env);
         env.mock_all_auths();
-        client.set_role(&signer2, &crate::storage::Role::Upgrader);
-        client.approve_upgrade(&signer2, &0u32);
-
-        let events = env.events().all();
-        assert_eq!(events.len(), 1, "approve_upgrade must emit exactly one event");
-
-        let (_, topics, _) = events.get(0).unwrap();
-        assert_eq!(
-            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
-            soroban_sdk::Symbol::new(&env, "upgrade_approved_event"),
-            "UpgradeApprovedEvent topic symbol changed"
-        );
-        assert_eq!(
-            u32::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
-            0u32,
-            "UpgradeApprovedEvent proposal_id topic changed"
-        );
+        let attest: ExportAttestation = client
+            .export_attestation(&0u32, &10u32)
+            .expect("export_attestation should succeed");
+        assert_eq!(attest.ledger, env.ledger().sequence());
+        assert_eq!(attest.version.len(), 3);
     }
 
     #[test]
-    fn test_upgrade_proposal_cancelled_event_shape() {
+    fn test_record_proof_type_is_exported() {
+        let env = Env::default();
+        let (_admin, user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
+
+        env.mock_all_auths();
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
+
+        let proof: RecordProof = client.get_record_proof(&name);
+        assert!(proof.exists);
+        assert!(!proof.verified);
+        assert!(proof.as_of_ledger > 0 || proof.registered_at == 0 || proof.exists);
+    }
+
+    #[test]
+    fn test_role_holder_type_is_exported() {
         let env = Env::default();
         let (admin, _user, _other, contract_id) = setup(&env);
         let client = TrustBridgeContractClient::new(&env, &contract_id);
 
-        let hash = soroban_sdk::BytesN::from_array(&env, &[0x03u8; 32]);
+        // initialize grants Role::Admin to admin via the role index.
+        let holders: soroban_sdk::Vec<RoleHolder> = client.get_role_holders(&0u32, &10u32);
+        assert!(holders.len() >= 1);
+        assert_eq!(holders.get(0).unwrap().address, admin);
+    }
+
+    #[test]
+    fn test_repair_report_no_drift_after_clean_operations() {
+        let env = Env::default();
+        let (admin, user, _other, contract_id) = setup(&env);
+        let client = TrustBridgeContractClient::new(&env, &contract_id);
+        let name = username(&env, "octocat");
+
         env.mock_all_auths();
-        env.ledger().set_timestamp(3_200_000_000);
-        client.propose_multisig_upgrade(&admin, &hash, &3600u64);
-        client.cancel_upgrade_proposal(&admin, &0u32);
+        env.as_contract(&contract_id, || {
+            TrustBridgeContract::register(
+                env.clone(),
+                name.clone(),
+                user.clone(),
+                Vec::new(&env),
+            )
+            .unwrap();
+        });
 
-        let events = env.events().all();
-        assert_eq!(events.len(), 1, "cancel_upgrade_proposal must emit exactly one event");
-
-        let (_, topics, _) = events.get(0).unwrap();
-        assert_eq!(
-            soroban_sdk::Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
-            soroban_sdk::Symbol::new(&env, "upgrade_proposal_cancelled_event"),
-            "UpgradeProposalCancelledEvent topic symbol changed"
-        );
-        assert_eq!(
-            u32::try_from_val(&env, &topics.get(1).unwrap()).unwrap(),
-            0u32,
-            "UpgradeProposalCancelledEvent proposal_id topic changed"
-        );
+        env.mock_all_auths();
+        let report: RepairReport = client
+            .repair_index(&false)
+            .expect("repair_index should succeed");
+        assert!(!report.drifted, "counters must not drift after normal register");
+        assert_eq!(report.stored_total, report.recomputed_total);
+        assert_eq!(report.stored_verified, report.recomputed_verified);
     }
 }

@@ -263,6 +263,70 @@ Completeness is enforced by `src/error.rs` unit tests
 | `address` | `Address` | Address holding the role |
 | `role` | `Role` | Role held, as the `Role` discriminant |
 
+### PendingRotation (Issue #234)
+
+Returned by `get_pending_rotation`. Represents an address rotation that has
+been requested but not yet executed.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `new_address` | `Address` | The address the registration will move to on execution |
+| `requested_at` | `u64` | Ledger timestamp the rotation was requested |
+| `executable_at` | `u64` | Earliest ledger timestamp at which `execute_address_rotation` may succeed |
+
+### PendingBatchRemove (Issue #219)
+
+Returned by `get_pending_batch_remove`. Represents a dual-control batch-remove
+proposal that has been queued but not yet executed or cancelled.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `usernames` | `Vec<String>` | Exact usernames to remove on execution |
+| `proposed_by` | `Address` | Address that called `propose_batch_remove`; `execute_batch_remove` rejects this address as executor |
+| `proposed_at` | `u64` | Ledger timestamp the proposal was created |
+
+### ExportAttestation (Issue #223)
+
+Returned by `export_attestation`. Bundles a paginated export page with a
+deterministic SHA-256 digest so off-chain consumers can verify the export
+matches what the contract held at the snapshot ledger.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `page` | `ExportPage` | The page as `get_registered_paginated` would return it |
+| `digest` | `BytesN<32>` | SHA-256 over `page`'s XDR encoding |
+| `version` | `Vec<u32>` | Contract version `[major, minor, patch]` at snapshot time |
+| `ledger` | `u32` | Ledger sequence the snapshot was taken at |
+
+### RecordProof (Issue #230)
+
+Returned by `get_record_proof`. Lets a light client confirm a single
+registration's existence and verified status without paging the full registry.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `exists` | `bool` | `true` when a record is currently stored for the queried username |
+| `verified` | `bool` | `true` when the record is verified; always `false` when `exists` is `false` |
+| `registered_at` | `u32` | Ledger timestamp the record was last written; `0` when absent |
+| `as_of_ledger` | `u32` | Ledger sequence at which the proof was taken |
+| `ttl_threshold_ledgers` | `u32` | Remaining-TTL threshold below which the entry is bumped |
+| `ttl_bump_ledgers` | `u32` | How far ahead of the current ledger a bump extends the entry |
+| `key_prefix` | `Symbol` | Symbol half of the record's storage key |
+
+### RepairReport (Issue #368)
+
+Returned by `repair_index`. Contains the stored counter values and the values
+recomputed by walking the index, so an operator can review any discrepancy
+before committing a correction.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `stored_total` | `u32` | Value of `count` read from instance storage |
+| `recomputed_total` | `u32` | Value recomputed by walking the index |
+| `stored_verified` | `u32` | Value of `verified` read from instance storage |
+| `recomputed_verified` | `u32` | Value recomputed by counting `verified = true` records |
+| `drifted` | `bool` | `true` when either counter differed from its recomputed value |
+
 ### VerifierAllowEntry (Issue #293)
 
 | Field | Type | Notes |
