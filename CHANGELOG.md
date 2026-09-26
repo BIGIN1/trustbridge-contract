@@ -5,6 +5,20 @@ version exposed by `version()` and follow semantic versioning: major for
 breaking changes, minor for additive interface changes, and patch for
 compatible corrections.
 
+## [1.2.0] - Unreleased
+
+### Added
+
+- Added `get_address_if_verified` to the public ABI for secure CI payouts (see [get_address_if_verified](docs/ABI.md#get_address_if_verifiedgithub_username-string---resultcontributorrecord-contracterror)).
+- Added verifier allowlist management (`add_verifier`, `remove_verifier`, `get_verifiers`, `is_active_verifier`, `verifier_slots_remaining`, `prune_expired_verifiers`).
+- Added role-grant timelock lifecycle functions (`activate_role`, `cancel_role_grant`).
+- Added build provenance tracking (`assert_build`, `set_provenance_digests`).
+
+### Changed
+
+- Fixed `NetworkMismatch` error code by moving its discriminant from 21 to 30 to avoid overlap with `InvalidPauseReason` (see [ContractError](docs/ABI.md#contracterror-u32-discriminant)).
+- Added new error codes `VerifierAllowlistFull` (31), `VerifierNotAllowlisted` (32), `VerifierExpiryInPast` (33), `NoPendingRoleGrant` (34), `RoleGrantNotReady` (35), `ProvenanceMissing` (36), and `ProvenanceMismatch` (37).
+
 ## [1.1.0] - 2026-09-26
 
 ### Added

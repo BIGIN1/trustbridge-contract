@@ -54,7 +54,7 @@ This contract provides that mapping **on-chain**:
 - `scripts/trustbridge_client.py` — typed Python wrappers for operator reads and batch operations
 - `get_stats` — total and verified registration counts
 - `pause` / `unpause` / `is_paused` — emergency circuit breaker to pause mutating contract state
-- `set_role` / `remove_role` / `get_role` — Role-Based Access Control (`Admin`, `Upgrader`, `Verifier`)
+- `set_role` / `remove_role` / `get_role` — Role-Based Access Control (`Admin`, `Upgrader`, `Verifier`, `Revoker`) — see [ABI Role Matrix](docs/ABI.md#role-u32-discriminant) and [Architecture](docs/ARCHITECTURE.md#authorization-model) for details.
 - `set_cooldown` / `get_cooldown` — WASM upgrade timelock cooldown period configuration
 - `upgrade` — admin/upgrader executable WASM code replacement
 - `migrate` / `get_version` — schema version migration harness and tracking
@@ -196,6 +196,7 @@ trustbridge-contract/
 | Rust | ≥ 1.84 (MSRV for `soroban-sdk` 26.x) |
 | wasm target | `wasm32v1-none` (required for SDK 26+) |
 | Stellar CLI | ≥ 26.x recommended |
+| Node.js | v16+ recommended (for bindings & tests) |
 
 ```bash
 # Install Rust targets
@@ -330,7 +331,7 @@ More examples (verify, remove, admin export): [docs/ABI.md](docs/ABI.md)
 | `remove(caller, github_username)` | `caller` (registrant or admin) | ✅ | Remove a registration |
 | `get_all_registered()` | Admin | ❌ | Export full registry |
 | `verify(caller, github_username)` | Admin **or** `Verifier`-role | ✅ | Mark as GitHub-verified |
-| `revoke_verification(caller, github_username)` | Admin **or** `Verifier`-role | ✅ | Clear a verification |
+| `revoke_verification(caller, github_username)` | Admin **or** `Revoker`-role | ✅ | Clear a verification |
 | `get_verified_count()` | None | ❌ | Verified registration count |
 | `get_stats()` | None | ❌ | `{ total, verified }` |
 | `version()` | None | ❌ | Deployed version as `(major, minor, patch)` |

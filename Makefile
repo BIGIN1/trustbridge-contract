@@ -36,7 +36,8 @@ FUTURENET_DRY_RUN ?= false
         deploy-testnet deploy-mainnet bindings bindings-build invoke-version require-contract-id \
         invoke-register invoke-lookup invoke-init invoke-stats install-target invoke-extend-ttl \
         ttl-keeper \
-	export-registry validate-registry dr-test futurenet-smoke assert-build
+	export-registry validate-registry dr-test futurenet-smoke assert-build \
+	xdr-fixtures diff-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}'
@@ -59,6 +60,12 @@ test-rehearsal: build ## Run protocol-upgrade rehearsal (requires pre-built WASM
 
 test-scale: ## Run the opt-in 10k-user pagination boundary load test
 	cargo test --test integration --features scale-test test_paginated_export_at_10k_users -- --nocapture --test-threads=1
+
+xdr-fixtures: ## Generate XDR fixtures for differential tests
+	cargo test --test generate_xdr_fixtures -- --ignored --nocapture --exact generate_xdr_fixtures
+
+diff-test: ## Run TypeScript differential tests
+	cd ts-differential-tests && npm install && npm test
 
 fuzz: ## Run the invariant property fuzzing suite (seeds: tests/fuzz/seeds.txt or FUZZ_SEEDS=0x1,0x2,...)
 	@out=$$(FUZZ_SEEDS="$(FUZZ_SEEDS)" cargo test --lib fuzz -- --nocapture 2>&1) || { echo "$$out"; exit 1; }; \

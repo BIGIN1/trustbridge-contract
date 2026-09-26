@@ -12,6 +12,33 @@ remains the runnable local reference.
   lifecycle, and the address-rotation lifecycle), plus a derived `Contributor`
   aggregate.
 
+## Schema Overview & Evolution
+
+The [`schema.graphql`](schema.graphql) file defines the entities that model the contract's state. It includes 1-to-1 mappings for every contributor-directed event (e.g., `RegisteredEvent`, `VerifiedEvent`) and a mutable `Contributor` aggregate that tracks the current state of a registered user.
+
+**Schema Evolution:**
+- The contract uses an `EventDomain` payload (introduced in 1.1.0) on most events, which includes `contractVersion`.
+- If the smart contract is upgraded and new fields are added to an event, or if new events are introduced, this `schema.graphql` and the corresponding mapping handlers must be updated to support them.
+- The `Contributor` aggregate might also need to be evolved if new core properties are tracked on-chain.
+
+## Sync Flow & Caveats
+
+When onboarding a new indexer (like Graph Node or Envio) using this schema, be aware of the following sync assumptions:
+
+- **Idempotency & Event IDs:** Entity IDs are stable, following the format `{networkId}:{contractId}:{ledgerSequence}:{txHash}:{eventIndex}` (see [`DASHBOARD_SYNC.md`](../DASHBOARD_SYNC.md#stable-event-id-issue-283)). Using this as the primary key ensures that ingestion is replay-idempotent.
+- **Event Ordering:** The indexer must process events strictly in order of `ledgerSequence` and then `eventIndex` within the transaction to maintain the correct state in the `Contributor` aggregate.
+- **Reconciliation:** Treat the subgraph as a change-notification cache. After any indexing gap or indexer restart, you should reconcile the indexer's state against the contract's authoritative storage using `get_public_paginated` (see [`DASHBOARD_SYNC.md`](../DASHBOARD_SYNC.md)).
+- **Re-orgs:** While standard indexers handle ledger rollbacks, the last-write-wins approach on the `Contributor` entity helps ensure the state eventually matches the chain even if events are re-processed.
+
+## Network & Address Configuration
+
+To deploy a subgraph from this schema, your indexer configuration (e.g., `subgraph.yaml`) must specify the exact environment:
+
+- **Contract Address (`contractId`):** The indexer must be scoped to the specific `C...` address of the deployed TrustBridge contract.
+- **Network / Passphrase:** You must configure the target network (e.g., Testnet or Public). Note that the `networkId` (SHA-256 of the network passphrase) is also emitted inside the `EventDomain` of most events for cross-verification.
+- **Start Ledger:** To avoid scanning the entire Stellar history from ledger 1, always set the start block/ledger to the sequence number where the contract was deployed.
+- For local testing and raw event viewing without a full indexer stack, refer to [`scripts/event_indexer.sh`](../../scripts/event_indexer.sh).
+
 ## Event → entity mapping
 
 Field names and types below are copied from the on-chain `#[contractevent]`

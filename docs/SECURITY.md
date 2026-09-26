@@ -756,22 +756,31 @@ Cross-reference: [remove auth negative matrix](#remove-auth-negative-matrix) (Is
 | R4 | Caller has no role | `NotAuthorized` | 3 | `test_revoke_negative_no_role_caller` |
 | R5 | `Role::Upgrader` holder | `NotAuthorized` | 3 | `test_revoke_negative_upgrader_cannot_revoke` |
 | R6 | **Admin caller** _(happy path)_ | `Ok(())` | — | `test_revoke_positive_admin_can_revoke` |
-| R7 | **`Role::Verifier` holder** _(happy path)_ | `Ok(())` | — | `test_revoke_positive_verifier_role_can_revoke` |
-| R8 | Contract is paused | `Paused` | 7 | `test_revoke_negative_paused` |
+| R7 | **`Role::Revoker` holder** _(happy path)_ | `Ok(())` | — | `test_revoke_positive_revoker_role_can_revoke` |
+| R8 | `Role::Verifier` holder | `NotAuthorized` | 3 | `test_revoke_negative_verifier_cannot_revoke` |
+| R9 | Contract is paused | `Paused` | 7 | `test_revoke_negative_paused` |
 
 ### Auth rules for `verify` and `revoke_verification`
 
 ```
+For verify:
 caller == admin                   →  allowed
 caller has Role::Verifier         →  allowed
+caller has Role::Revoker          →  NotAuthorized (code 3)
+
+For revoke_verification:
+caller == admin                   →  allowed
+caller has Role::Revoker          →  allowed
+caller has Role::Verifier         →  NotAuthorized (code 3)
+
 caller has Role::Upgrader         →  NotAuthorized (code 3)
 caller has no role                →  NotAuthorized (code 3)
 ```
 
 Both functions require a `caller: Address` argument so the contract can call
 `caller.require_auth()` and enforce the role check in a single auditable step.
-Only the admin and any address granted `Role::Verifier` via `set_role` may
-call these functions.
+Only the admin, an address granted `Role::Verifier` (for verification), or an address granted `Role::Revoker` (for revocation) may call these functions.
+
 
 The `verify` function additionally guards against illegal state transitions:
 - Verifying an unregistered username → `NotRegistered` (code 4)
