@@ -102,26 +102,86 @@ See the full [ABI reference](docs/ABI.md) for argument types, return values, and
 ```
 trustbridge-contract/
 ├── src/
-│   ├── lib.rs          # Contract implementation + unit tests
-│   ├── storage.rs      # Storage keys, Role enum, accessors
-│   ├── events.rs       # Contract event definitions (Registered, Verified, Upgraded, Paused, Role, etc.)
-│   └── error.rs        # ContractError enum (includes Paused, CooldownActive, etc.)
+│   ├── lib.rs              # Contract implementation + unit tests
+│   ├── storage.rs          # Storage keys, types, accessors, TTL constants
+│   ├── events.rs           # Contract event definitions (27 event types)
+│   ├── error.rs            # ContractError enum (includes Paused, CooldownActive, etc.)
+│   ├── domain.rs           # EventDomain for deployment identification (Issue #226)
+│   ├── utils.rs            # Username canonicalization, validation helpers
+│   ├── batch.rs            # Batch operations (verify, remove) with summaries
+│   ├── audit.rs            # Audit logging & statistics
+│   ├── merkle.rs           # Merkle tree for export attestations (Issue #216)
+│   ├── version.rs          # Version parsing & compatibility checks
+│   ├── staged_wasm.rs      # Staged WASM deployment (Issue #300)
+│   ├── multisig_upgrade.rs # Multi-sig upgrade governance (Issue #301)
+│   └── oracle_proof.rs     # Oracle-based verification proofs
 ├── tests/
-│   └── integration.rs  # End-to-end integration test suite & event tracking
+│   ├── integration.rs      # End-to-end integration test suite & event tracking
+│   ├── contract_error_codes.rs # Error code coverage tests
+│   ├── event_replay.rs     # Event replay idempotency tests (Issue #135)
+│   ├── cursor_pagination.rs # Opaque cursor pagination tests (Issue #215)
+│   ├── pagination_parity.rs # Admin vs public pagination parity (Issue #294)
+│   ├── extend_registry_ttl.rs # TTL extension tests
+│   ├── merkle_export.rs    # Merkle export & proof tests
+│   ├── cross_contract_register_deny.rs # Cross-contract auth tests
+│   ├── registry_hole_policy.rs # Empty registry invariant tests
+│   ├── homoglyph_corpus.rs # Username homoglyph attack tests
+│   ├── username_case_fold.rs # Case-folding tests
+│   ├── counter_proofs.rs   # Record existence proof tests
+│   ├── repair_index.rs     # Index compaction tests
+│   └── zero_address.rs     # Zero address rejection tests
 ├── scripts/
-│   ├── deploy.sh       # Network-aware deploy + initialize script
-│   ├── export_registry.py # Typed registry exporter
-│   └── trustbridge_client.py # Python client backed by Stellar CLI
+│   ├── deploy.sh           # Network-aware deploy + initialize
+│   ├── event_indexer.sh    # Reference event indexer (Issue #288)
+│   ├── export_registry.sh  # Page admin export to JSON snapshot
+│   ├── export_registry.py  # Typed registry exporter (Python)
+│   ├── validate_registry.sh # Diff export JSON against live state
+│   ├── ttl_keeper.sh       # Walk index & bump persistent-entry TTLs
+│   ├── bulk_verify.sh      # Batched verify from username list
+│   ├── bulk_revoke.sh      # Batched revoke from username list
+│   ├── simulate_pause.sh   # Exercise pause/unpause lifecycle
+│   ├── futurenet_smoke_test.sh # End-to-end Futurenet smoke test
+│   ├── storage_rent_estimator.py # Estimate on-chain storage entry counts
+│   ├── trustbridge_client.py # Typed Python client for operator reads
+│   ├── payout_allowlist.sh / payout_allowlist.py # Payout allowlist ops
+│   ├── dr_test.sh          # Disaster recovery test (export/validate round-trip)
+│   ├── generate_abi_json.py # Generate machine-readable ABI JSON
+│   ├── check_changelog_abi.sh # Verify CHANGELOG/ABI consistency
+│   └── check_bench_regression.sh # Benchmark regression detection
 ├── docs/
-│   ├── ARCHITECTURE.md # Design, storage, auth, events
-│   ├── ABI.md          # Function & event reference
-│   ├── DEPLOYMENT.md   # Testnet/mainnet deployment guide
-│   ├── REGISTRY_INVARIANTS.md # Invariants and the property fuzzing suite
-│   └── CONTRIBUTING.md # How to contribute
+│   ├── README.md           # Documentation index
+│   ├── ARCHITECTURE.md     # Design, storage, auth, events, data flow
+│   ├── ABI.md              # Complete function, event, error reference
+│   ├── DEPLOYMENT.md       # Testnet/mainnet deployment guide
+│   ├── EVENT_INDEXING.md   # Event consumption, idempotency, lag detection
+│   ├── DASHBOARD_SYNC.md   # Dashboard/indexer sync patterns
+│   ├── STORAGE_KEYS.md     # Storage key inventory & collision analysis
+│   ├── STORAGE_RENT.md     # Storage rent economics, TTL management
+│   ├── STORAGE_RENT_ESTIMATOR.md # Storage rent estimator specification
+│   ├── STORAGE_FOOTPRINT.md # Storage entry size analysis
+│   ├── CONTRACT_HEALTH.md  # Health endpoint specification
+│   ├── BENCHMARK_BUDGETS.md # CPU/memory budget baselines
+│   ├── REGISTRY_INVARIANTS.md # Invariants & property fuzzing suite
+│   ├── SECURITY.md         # Threat model & security considerations
+│   ├── ADMIN_RUNBOOK.md    # Operational runbook for admins
+│   ├── CONTRIBUTING.md     # Development workflow, PR guidelines
+│   ├── FUTURENET_ONBOARDING.md # Futurenet deployment guide
+│   ├── TESTNET_CHECKLIST.md # Testnet deployment checklist
+│   ├── subgraph/
+│   │   ├── schema.graphql  # GraphQL schema for subgraph indexing
+│   │   └── README.md       # Subgraph deployment guide
+│   ├── abi.json            # Machine-readable contract ABI
+│   └── storage-rent-estimator.inputs.v1.json # Estimator input schema
 ├── .github/workflows/
-│   └── ci.yml          # fmt, clippy, test, contract build
-├── Makefile            # build, test, deploy, invoke targets
+│   └── ci.yml              # fmt, clippy, test, contract build, bench
+├── Makefile                # build, test, deploy, invoke, bench targets
 ├── Cargo.toml
+├── rust-toolchain.toml     # Pinned toolchain & wasm target
+├── deny.toml               # Cargo deny configuration
+├── mutants.toml            # Mutation testing configuration
+├── wasm-hash.pin           # Release WASM SHA-256 pin
+├── CHANGELOG.md
+├── LICENSE
 └── README.md
 ```
 
@@ -306,9 +366,19 @@ Full index: [docs/README.md](docs/README.md)
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Storage layout, auth model, event design, data flow |
 | [docs/ABI.md](docs/ABI.md) | Complete function, event, and error reference |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Testnet/mainnet deployment, env vars, troubleshooting |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development workflow, PR guidelines, code standards |
-| [docs/SECURITY.md](docs/SECURITY.md) | Threat model and security considerations |
+| [docs/EVENT_INDEXING.md](docs/EVENT_INDEXING.md) | Event consumption, idempotency, lag detection, domain separation |
+| [docs/DASHBOARD_SYNC.md](docs/DASHBOARD_SYNC.md) | Dashboard/indexer sync patterns, paginated reads, re-verification |
+| [docs/STORAGE_KEYS.md](docs/STORAGE_KEYS.md) | Storage key inventory, collision analysis, TTL behavior |
 | [docs/STORAGE_RENT.md](docs/STORAGE_RENT.md) | Storage rent economics, TTL management, keeper checklist |
+| [docs/STORAGE_RENT_ESTIMATOR.md](docs/STORAGE_RENT_ESTIMATOR.md) | Storage rent estimator specification & input schema |
+| [docs/CONTRACT_HEALTH.md](docs/CONTRACT_HEALTH.md) | Health endpoint specification & monitoring |
+| [docs/BENCHMARK_BUDGETS.md](docs/BENCHMARK_BUDGETS.md) | CPU/memory budget baselines & regression thresholds |
+| [docs/REGISTRY_INVARIANTS.md](docs/REGISTRY_INVARIANTS.md) | Invariants & property fuzzing suite |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model and security considerations |
+| [docs/ADMIN_RUNBOOK.md](docs/ADMIN_RUNBOOK.md) | Operational runbook for admins |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development workflow, PR guidelines, code standards |
+| [docs/FUTURENET_ONBOARDING.md](docs/FUTURENET_ONBOARDING.md) | Futurenet deployment guide |
+| [docs/TESTNET_CHECKLIST.md](docs/TESTNET_CHECKLIST.md) | Testnet deployment checklist |
 
 ---
 
