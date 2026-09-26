@@ -5,6 +5,14 @@ version exposed by `version()` and follow semantic versioning: major for
 breaking changes, minor for additive interface changes, and patch for
 compatible corrections.
 
+## [1.1.0] - 2026-09-26
+
+### Added
+
+- Added `batch_verify` to the public contract interface. Clients should gate
+    this call on `is_compatible(1, 1, 0)` when older deployments are supported.
+- New instances now initialize and report contract version `1.1.0`.
+
 ## [1.0.0] - 2026-08-28
 
 ### ABI snapshot

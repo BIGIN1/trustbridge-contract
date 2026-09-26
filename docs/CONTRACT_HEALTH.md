@@ -83,7 +83,7 @@ Expected output when healthy:
 ```json
 {
   "paused": false,
-  "version": [1, 0, 0],
+  "version": [1, 1, 0],
   "total": 42,
   "verified": 17,
   "cooldown_secs": 86400,

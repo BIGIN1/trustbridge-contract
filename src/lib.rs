@@ -138,7 +138,7 @@ impl RevokeReason {
 /// version tracking fall back to this.
 pub const CONTRACT_VERSION: Version = Version {
     major: 1,
-    minor: 0,
+    minor: 1,
     patch: 0,
 };
 
@@ -191,7 +191,7 @@ impl TrustBridgeContract {
         set_ever_verified_count(&env, 0);
         set_paused_state(&env, false);
         storage_set_cooldown(&env, 0);
-        set_version(&env, (1, 0, 0));
+        set_version(&env, CONTRACT_VERSION.to_tuple());
         storage_set_role(&env, &admin, &Role::Admin);
 
         let timestamp = env.ledger().timestamp();
@@ -7792,6 +7792,11 @@ mod test {
         let (_admin, _user, _other, contract_id) = setup(&env);
 
         env.as_contract(&contract_id, || {
+            assert_eq!(
+                TrustBridgeContract::get_version(env.clone()),
+                CONTRACT_VERSION.to_tuple()
+            );
+            set_version(&env, (1, 0, 0));
             assert_eq!(TrustBridgeContract::get_version(env.clone()), (1, 0, 0));
         });
 
@@ -7807,7 +7812,25 @@ mod test {
         });
 
         env.as_contract(&contract_id, || {
-            assert_eq!(TrustBridgeContract::get_version(env.clone()), (1, 1, 0));
+            assert_eq!(
+                TrustBridgeContract::get_version(env.clone()),
+                CONTRACT_VERSION.to_tuple()
+            );
+        });
+    }
+
+    #[test]
+    fn test_is_compatible_matches_initialized_batch_verify_version() {
+        let env = Env::default();
+        let (_admin, _user, _other, contract_id) = setup(&env);
+
+        env.as_contract(&contract_id, || {
+            assert_eq!(
+                TrustBridgeContract::version(env.clone()),
+                CONTRACT_VERSION.to_tuple()
+            );
+            assert!(TrustBridgeContract::is_compatible(env.clone(), 1, 1, 0));
+            assert!(!TrustBridgeContract::is_compatible(env.clone(), 1, 1, 1));
         });
     }
 

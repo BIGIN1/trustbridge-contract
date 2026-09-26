@@ -1767,7 +1767,11 @@ Returns the deployed contract version as `(major, minor, patch)`.
 
 The version is written to instance storage by `initialize`. Instances deployed
 before version tracking existed carry no stored version and report the build
-constant `1.0.0` instead.
+constant `1.1.0` instead.
+
+Fresh instances initialize at `1.1.0`. An already-initialized `1.0.0` instance
+retains its stored version after a WASM upgrade; the admin must call
+`migrate([1, 1, 0])` after installing the version that includes `batch_verify`.
 
 ```bash
 stellar contract invoke --id $ID --source deployer --network testnet \
@@ -2032,8 +2036,8 @@ tests in `src/version.rs` fail if either constant drifts:
 Compatibility is a version-order gate, not permission to make a breaking ABI
 change without review. Any breaking change requires a major `CONTRACT_VERSION`
 bump, an explicit migration story, and updated consumer minimums. Additive
-features use a minor bump and must add or update their own minimum-version
-constant and policy-table case.
+features introduced after a published minimum use a minor bump and must add or
+update their own minimum-version constant and policy-table case.
 
 ### Regeneration checklist
 
