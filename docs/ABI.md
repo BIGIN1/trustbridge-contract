@@ -37,6 +37,15 @@ When the contract ABI changes (e.g., field reordering, type changes):
 If TypeScript decode fails, the bindings have drifted and need regeneration
 (`make bindings`) or the TypeScript test needs updating to match the new ABI.
 
+### Shared `get_address` simulate golden (Issue #328)
+
+`tests/testdata/bindings/get_address_simulate.v1.json` is a versioned golden of
+the `ScVal` XDR that `simulateTransaction` returns for `get_address` (hit and
+miss). `tests/bindings_golden.rs` fails when the contract encoding drifts, and CI
+uploads the file as the `bindings-golden-fixtures` artifact for
+`trustbridge-action/src/soroban.ts` to consume. See
+[the fixture README](../tests/testdata/bindings/README.md).
+
 ### CI Integration
 
 The `differential-tests` CI job runs after the main quality gate and verifies

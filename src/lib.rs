@@ -10782,13 +10782,43 @@ mod test {
         }
     }
 
-    /// Fixed seeds — failures are deterministic and always reproduce.
-    const FUZZ_SEEDS: &[u64] = &[
-        0xDEAD_BEEF_1234_5678,
-        0xCAFE_BABE_FEED_FACE,
-        0x0101_0101_ABCD_EF01,
-        0x9999_8888_7777_6666,
-    ];
+    /// Checked-in seed corpus (Issue #331) — failures are deterministic and
+    /// always reproduce. Append a failing seed to `tests/fuzz/seeds.txt`.
+    const FUZZ_SEED_CORPUS: &str = include_str!("../tests/fuzz/seeds.txt");
+
+    fn parse_fuzz_seeds(text: &str) -> std::vec::Vec<u64> {
+        text.split(|c: char| c == '\n' || c == ',')
+            .map(|l| l.split('#').next().unwrap_or("").trim())
+            .filter(|l| !l.is_empty())
+            .map(|l| {
+                let clean = l.replace('_', "");
+                match clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
+                    Some(hex) => u64::from_str_radix(hex, 16),
+                    None => clean.parse::<u64>(),
+                }
+                .unwrap_or_else(|_| panic!("invalid fuzz seed: {l:?}"))
+            })
+            .collect()
+    }
+
+    /// Seeds for this run: `FUZZ_SEEDS` env var (comma-separated) if set,
+    /// otherwise the checked-in corpus. Always at least 4 seeds.
+    fn fuzz_seeds() -> std::vec::Vec<u64> {
+        let seeds = match std::env::var("FUZZ_SEEDS") {
+            Ok(v) if !v.trim().is_empty() => parse_fuzz_seeds(&v),
+            _ => parse_fuzz_seeds(FUZZ_SEED_CORPUS),
+        };
+        assert!(seeds.len() >= 4, "need at least 4 fuzz seeds, got {}", seeds.len());
+        seeds
+    }
+
+    #[test]
+    fn test_fuzz_seed_corpus_parses() {
+        let seeds = parse_fuzz_seeds(FUZZ_SEED_CORPUS);
+        assert!(seeds.len() >= 4);
+        assert_eq!(seeds[0], 0xDEAD_BEEF_1234_5678);
+        assert_eq!(parse_fuzz_seeds("0x10, 7 # c"), std::vec![16, 7]);
+    }
 
     /// Shadow model of the registry. Mirrors the contract's own counters using
     /// independent logic so a bug in the contract cannot hide itself.
@@ -11034,7 +11064,7 @@ mod test {
             "alice", "bob", "carol", "dave", "eve", "frank", "grace", "heidi",
         ];
 
-        for &seed in FUZZ_SEEDS {
+        for seed in fuzz_seeds() {
             let env = Env::default();
             let (admin, _user, _other, contract_id) = setup(&env);
             let addrs: std::vec::Vec<Address> = (0..4).map(|_| Address::generate(&env)).collect();
@@ -11063,7 +11093,7 @@ mod test {
         let (admin, _user, _other, contract_id) = setup(&env);
         let addrs: std::vec::Vec<Address> = (0..8).map(|_| Address::generate(&env)).collect();
 
-        let mut prng = Prng(FUZZ_SEEDS[0]);
+        let mut prng = Prng(fuzz_seeds()[0]);
         run_fuzz_session(
             &env,
             &contract_id,
@@ -11094,7 +11124,7 @@ mod test {
 
         let usernames = ["target", "ghost"];
         let addrs = [user.clone(), admin.clone()];
-        let mut prng = Prng(FUZZ_SEEDS[2]);
+        let mut prng = Prng(fuzz_seeds()[2]);
         let mut shadow = Shadow::default();
         shadow.register("target".to_string(), 0);
 
@@ -11178,7 +11208,7 @@ mod test {
         let env = Env::default();
         let (_admin, _user, _other, contract_id) = setup(&env);
 
-        let mut prng = Prng(FUZZ_SEEDS[3]);
+        let mut prng = Prng(fuzz_seeds()[3]);
         let usernames = ["ghost1", "ghost2", "ghost3"];
 
         for _ in 0..32 {

@@ -165,7 +165,10 @@ make simulate-register CONTRACT_ID=$CONTRACT_ID STELLAR_ADDR=$STELLAR_ADDR
 The fuzzing suite drives randomized `register` / `verify` / `revoke_verification` /
 `remove` sequences against an independent model of the registry and asserts the
 invariants in [docs/REGISTRY_INVARIANTS.md](docs/REGISTRY_INVARIANTS.md) after every
-step. Seeds are fixed constants, so failures replay deterministically.
+step. Seeds come from the checked-in corpus `tests/fuzz/seeds.txt`, so failures
+replay deterministically; override with `make fuzz FUZZ_SEEDS=0x1,0x2,0x3,0x4`
+(at least 4 seeds). `make fuzz` fails if no fuzz tests executed, and CI runs it
+on every PR.
 
 ### Devcontainer / Codespaces
 

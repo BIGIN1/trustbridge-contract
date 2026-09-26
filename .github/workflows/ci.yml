@@ -24,3 +24,36 @@ jobs:
           test -f src/lib.rs
           test -f README.md
           test -f Makefile
+
+      - name: Storage key inventory
+        run: ./scripts/check_storage_keys.sh
+
+      - name: Fuzz seed corpus present
+        run: test "$(grep -cvE '^\s*(#|$)' tests/fuzz/seeds.txt)" -ge 4
+
+  contract-tests:
+    name: Fuzz suite + bindings golden
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: make fuzz
+        run: make fuzz
+
+      - name: Bindings golden (get_address simulate XDR)
+        run: make bindings-golden
+
+      - name: Upload bindings golden fixture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-golden-fixtures
+          path: tests/testdata/bindings/
+          if-no-files-found: error

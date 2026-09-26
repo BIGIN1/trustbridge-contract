@@ -128,3 +128,68 @@ const health = await contract.get_health();
 // health.paused, health.version, health.total, health.verified,
 // health.cooldown_secs, health.cooldown_remaining_secs, health.attestation_present
 ```
+
+---
+
+## Invoke-trace playbook for operators (Issue #329)
+
+`get_health` tells you the contract's *state*. When a specific
+`stellar contract invoke` fails during an incident, use this section to read
+the failure and map it to a cause. Error codes are the `u32` discriminants of
+`ContractError` in [`src/error.rs`](../src/error.rs); the full table is in
+[ABI.md → ContractError](ABI.md#contracterror-u32-discriminant).
+
+### 1. Reproduce without submitting
+
+Simulate first — it costs nothing and returns the same contract error:
+
+```bash
+stellar contract invoke --id "$CONTRACT_ID" --source "$SOURCE" --network "$NETWORK" \
+  --send=no -- verify --caller "$CALLER" --github_username octocat
+```
+
+For more detail from the CLI (RPC requests, simulation result, diagnostic
+events), add the global verbosity flags `--verbose` (`-v`) or
+`--very-verbose` (`-vv`). Flag names vary between Stellar CLI releases —
+confirm against `stellar contract invoke --help` for your installed version
+(the repo targets 26.x) rather than copying flags from older guides.
+
+### 2. Read the trace
+
+A failed invoke surfaces the contract error as `Error(Contract, #N)` in the
+CLI output and in the diagnostic events of the simulation / transaction
+result. `N` is the `ContractError` code. Other shapes mean the contract never
+returned its own error:
+
+| Trace shape | Meaning |
+|---|---|
+| `Error(Contract, #N)` | Contract rejected the call — look up `N` below |
+| `Error(Auth, InvalidAction)` / auth errors | Missing or wrong signature for a `require_auth` address (wrong `--source`, or the caller arg ≠ signer) |
+| `Error(Storage, MissingValue)` / archived entry | Entry TTL expired — restore it, then run the TTL keeper ([STORAGE_RENT.md](STORAGE_RENT.md)) |
+| `Error(Budget, ExceededLimit)` | CPU/memory budget exceeded — see [BENCHMARK_BUDGETS.md](BENCHMARK_BUDGETS.md); usually an oversized batch |
+| `Error(WasmVm, ...)` | Contract trapped (panic / abort) — capture the full trace and escalate as a bug |
+
+### 3. Common contract errors → likely cause → first action
+
+| Code | Error | Likely cause during an incident | First action |
+|---|---|---|---|
+| 1 | `AlreadyInitialized` | Deploy script re-ran `initialize` against a live contract | None needed; contract is already set up |
+| 2 | `NotInitialized` | Wrong `CONTRACT_ID` / network, or fresh deploy never initialized | Check `--id` and `--network`; `get_health` also returns this |
+| 3 | `NotAuthorized` | Caller lacks the Admin/Verifier/Upgrader role, or role expired | `has_role` / role listing for the caller; see [ADMIN_RUNBOOK.md](ADMIN_RUNBOOK.md) |
+| 4 | `NotRegistered` | Username never registered, removed, or typo | `get_address` for the username |
+| 5 | `AlreadyVerified` | Duplicate verify (retry after a timeout that actually succeeded) | Treat as success; confirm with `get_address` |
+| 6 | `NotVerified` | Revoke on an unverified username | Confirm state with `get_address` |
+| 7 | `Paused` | Contract paused (maintenance or emergency) | `get_health` → `paused: true`; see pause procedure in [ADMIN_RUNBOOK.md](ADMIN_RUNBOOK.md) |
+| 8 | `CooldownActive` | `upgrade` before the timelock elapsed, or per-user action cooldown | `get_health` → `cooldown_remaining_secs`; wait it out |
+| 9 | `InvalidVersion` | `migrate` target not greater than current version | `version()`; fix the migration target |
+| 10 | `InvalidRole` | Unknown role discriminant passed to a role call | Use the `Role` values in [ABI.md](ABI.md#role-u32-discriminant) |
+| 11 | `InvalidUsername` | Empty, too long, or non-GitHub characters | `is_username_valid` for the input |
+| 12 | `AttestationExpired` | Upgrade attestation lapsed before `upgrade` ran | Re-attest, then upgrade promptly |
+| 13 | `UnattestedWasm` | Upgrade hash differs from the attested hash | Compare against `wasm-hash.pin` / attestation |
+| 14 | `InvalidBatchSize` | Batch empty or larger than the configured max | Split the batch ([ABI.md → Batch size limits](ABI.md#batch-size-limits-issue-227)) |
+| 15 | `InvalidReasonCode` | Unknown revoke reason code | Use a `RevokeReason` value |
+| 16 | `ZeroAddress` | Zero/burn address supplied as a Stellar address | Fix the input address |
+
+Codes above 16 (challenge, reservation, admin-transfer, allowlist,
+provenance errors) are listed in the ABI table; `src/error.rs` is the source
+of truth if the two ever disagree.

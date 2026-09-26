@@ -15,6 +15,7 @@ CONTRACT_ID ?=
 GITHUB_USER ?=
 STELLAR_ADDR ?=
 CALLER      ?=
+FUZZ_SEEDS  ?=
 BENCH_OUT   ?= bench-results.txt
 NORM_BENCH_OUT ?= bench-username-normalization.txt
 REGISTER_BUDGET_CPU_MAX ?= 25000000
@@ -29,7 +30,7 @@ FUTURENET_FRIENDBOT_URL ?= https://friendbot-futurenet.stellar.org
 FUTURENET_IDENTITY ?= $(SOURCE)
 FUTURENET_DRY_RUN ?= false
 
-.PHONY: help build build-legacy test test-rehearsal fuzz bench bench-export bench-username bench-double-verify bench-register-budget bench-budget-ci bench-update-samples fmt lint docs docs-check abi check ci clean \
+.PHONY: help build build-legacy test test-rehearsal fuzz storage-keys-check bindings-golden bench bench-export bench-username bench-double-verify bench-register-budget bench-budget-ci bench-update-samples fmt lint docs docs-check abi check ci clean \
         deploy-testnet deploy-mainnet bindings bindings-build invoke-version require-contract-id \
         invoke-register invoke-lookup invoke-init invoke-stats install-target invoke-extend-ttl \
 	export-registry validate-registry dr-test futurenet-smoke assert-build
@@ -56,8 +57,18 @@ test-rehearsal: build ## Run protocol-upgrade rehearsal (requires pre-built WASM
 test-scale: ## Run the opt-in 10k-user pagination boundary load test
 	cargo test --test integration --features scale-test test_paginated_export_at_10k_users -- --nocapture --test-threads=1
 
-fuzz: ## Run the invariant property fuzzing suite (deterministic seeds)
-	cargo test fuzz -- --nocapture
+fuzz: ## Run the invariant property fuzzing suite (seeds: tests/fuzz/seeds.txt or FUZZ_SEEDS=0x1,0x2,...)
+	@out=$$(FUZZ_SEEDS="$(FUZZ_SEEDS)" cargo test --lib fuzz -- --nocapture 2>&1) || { echo "$$out"; exit 1; }; \
+	echo "$$out"; \
+	n=$$(echo "$$out" | sed -nE 's/^test result: ok\. ([0-9]+) passed.*/\1/p' | awk '{s+=$$1} END {print s+0}'); \
+	if [ "$$n" -eq 0 ]; then echo "make fuzz: no fuzz tests executed" >&2; exit 1; fi; \
+	echo "make fuzz: $$n fuzz tests passed"
+
+storage-keys-check: ## Fail if a storage.rs key is missing from docs/STORAGE_KEYS.md
+	./scripts/check_storage_keys.sh
+
+bindings-golden: ## Verify the get_address simulate golden fixture (UPDATE_GOLDEN=1 to regenerate)
+	cargo test --test bindings_golden -- --nocapture
 
 bench: ## Report CPU/memory cost per contract operation
 	cargo test bench -- --nocapture --test-threads=1

@@ -102,9 +102,11 @@ The suite lives alongside the unit tests in `src/lib.rs` under the
 - **No external fuzzing crate.** The contract is `#![no_std]`, which rules out
   `proptest` and `arbitrary`. The suite uses a small xorshift64 generator
   (`Prng`) instead.
-- **Deterministic seeds.** Seeds are fixed constants (`FUZZ_SEEDS`). A CI
-  failure reproduces locally by rerunning the same test, with no flakes and no
-  seed corpus to store.
+- **Deterministic seeds.** Seeds come from the checked-in corpus
+  `tests/fuzz/seeds.txt` (Issue #331), loaded via `fuzz_seeds()`. Setting the
+  `FUZZ_SEEDS` env var (comma-separated hex or decimal, at least 4) overrides
+  the corpus for exploration. A CI failure reproduces locally by rerunning the
+  same test; append any seed that finds a bug to the corpus.
 - **Shadow model.** `Shadow` mirrors the registry outside contract storage.
   Every assertion compares contract state against that independent model, so a
   bug in the contract's own counters cannot mask itself.
@@ -120,7 +122,8 @@ The suite lives alongside the unit tests in `src/lib.rs` under the
 ```bash
 cargo test fuzz              # invariant suite only
 cargo test                   # full suite
-make fuzz                    # same as cargo test fuzz (Makefile target)
+make fuzz                    # cargo test --lib fuzz; fails if 0 tests ran (CI runs this)
+make fuzz FUZZ_SEEDS=0x1,0x2,0x3,0x4   # explore with custom seeds
 make check                   # fmt + clippy + test + build
 ```
 
@@ -147,7 +150,7 @@ transaction or deployment test.
 
 | Test | Steps | Purpose |
 |------|-------|---------|
-| `test_fuzz_invariants_hold_across_random_operation_sequences` | 4 seeds × 64 | Broad operation mixing |
+| `test_fuzz_invariants_hold_across_random_operation_sequences` | every corpus seed × 64 | Broad operation mixing |
 | `test_fuzz_invariants_hold_at_contributor_scale` | 256 | Repeated churn on 16-username pool (stresses chunk boundaries) |
 | `test_fuzz_failure_paths_leave_invariants_intact` | 48 | Rejected operations are side-effect free (I7) |
 | `test_fuzz_counters_never_underflow_on_empty_registry` | 32 | Saturating-arithmetic guard (I8) |
