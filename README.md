@@ -408,3 +408,6 @@ Copyright © 2026 [Stellar-TrustBridge](https://github.com/Stellar-TrustBridge)
 
 <!-- handsoff-issue-307 -->
 - #307: Formal audit prep pack: threat-model tests as code from SECURITY.md
+
+<!-- handsoff-issue-361 -->
+- #361: Add missing ContractError variants used by lib.rs
