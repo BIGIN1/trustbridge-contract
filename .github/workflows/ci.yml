@@ -24,3 +24,6 @@ jobs:
           test -f src/lib.rs
           test -f README.md
           test -f Makefile
+
+      - name: Check storage-rent estimator golden
+        run: bash scripts/test_storage_rent_estimator.sh

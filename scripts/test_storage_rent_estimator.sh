@@ -13,7 +13,8 @@ GOLDEN="scripts/testdata/storage-rent-estimator.golden.txt"
 
 actual="$(python3 scripts/storage_rent_estimator.py --users 250 --roles 3 --lastact 100)"
 if ! diff -u "$GOLDEN" <(printf '%s\n' "$actual"); then
-  echo "FAIL: estimator output does not match $GOLDEN" >&2
+  echo "FAIL: estimator output differs from $GOLDEN." >&2
+  echo "Inspect docs/storage-rent-estimator.inputs.v1.json and update it with the golden output if the change is intentional." >&2
   exit 1
 fi
 
