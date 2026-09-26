@@ -404,3 +404,17 @@ make check    # Run the full local quality gate before submitting
 This project is licensed under the [MIT License](LICENSE).
 
 Copyright © 2026 [Stellar-TrustBridge](https://github.com/Stellar-TrustBridge)
+
+## Handsoff notes
+
+<!-- handsoff-issue-307 -->
+- #307: Formal audit prep pack: threat-model tests as code from SECURITY.md
+
+<!-- handsoff-issue-361 -->
+- #361: Add missing ContractError variants used by lib.rs
+
+<!-- handsoff-issue-367 -->
+- #367: Align ContributorRecord fields with callers
+
+<!-- handsoff-issue-370 -->
+- #370: Implement public admin-transfer entry points documented in ABI
