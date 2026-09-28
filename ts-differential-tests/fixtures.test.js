@@ -57,6 +57,14 @@ function parseAddressFromXdr(xdrString) {
   return null;
 }
 
+import {
+  parseContributorRecord,
+  parseExportRecord,
+  parseExportPage,
+  decodeExportPageFromXdr,
+  EXPORT_PAGE_LAYOUT_VERSION,
+} from './export_page.js';
+
 // Test: get_address fixture should decode to expected address
 export default {
   async test() {
@@ -81,5 +89,47 @@ export default {
     }
     
     console.log('✓ TypeScript decode matches Rust golden value');
+
+    // Test ExportPage & ContributorRecord typed parsing
+    if (EXPORT_PAGE_LAYOUT_VERSION !== 2) {
+      throw new Error(`Expected EXPORT_PAGE_LAYOUT_VERSION to be 2, got ${EXPORT_PAGE_LAYOUT_VERSION}`);
+    }
+
+    const testRecordRaw = {
+      stellar_address: goldenAddress,
+      payout_address: goldenAddress,
+      registered_at: 1700000000,
+      verified: true,
+      is_bot: false,
+    };
+
+    const parsedRecord = parseContributorRecord(testRecordRaw);
+    if (
+      parsedRecord.stellar_address !== goldenAddress ||
+      parsedRecord.payout_address !== goldenAddress ||
+      parsedRecord.registered_at !== 1700000000 ||
+      parsedRecord.verified !== true ||
+      parsedRecord.is_bot !== false
+    ) {
+      throw new Error('parseContributorRecord failed to extract typed fields correctly');
+    }
+
+    const testPageRaw = {
+      records: [['octocat', testRecordRaw]],
+      next_cursor: Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]),
+      total: 1,
+      merkle_root: Buffer.alloc(32, 0xaa),
+      has_more: false,
+    };
+
+    const parsedPage = parseExportPage(testPageRaw);
+    if (parsedPage.total !== 1 || parsedPage.has_more !== false || !parsedPage.next_cursor || !parsedPage.merkle_root) {
+      throw new Error('parseExportPage failed to parse page header');
+    }
+    if (parsedPage.records.length !== 1 || parsedPage.records[0][0] !== 'octocat') {
+      throw new Error('parseExportPage failed to parse records');
+    }
+
+    console.log('✓ TypeScript typed export bindings match expected layout v2');
   }
 };

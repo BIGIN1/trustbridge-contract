@@ -77,24 +77,33 @@ struct Stats {
 }
 ```
 
-### ExportPage
+### ExportPage (Layout Version: 2)
 
-Returned by `get_registered_paginated` and `get_public_paginated`. Unlike
-`get_all_registered`, each entry is a full `ContributorRecord` — so `verified`
-is available directly, with no second call needed (Issue #96).
+Returned by `get_registered_paginated` and `get_public_paginated`. Each entry
+in `records` is a full `(String, ContributorRecord)` pair (`ExportRecord`) — so
+`verified` is available directly, with no second call needed (Issue #96).
 
 ```rust
+pub const EXPORT_PAGE_LAYOUT_VERSION: u32 = 2;
+
+pub type ExportRecord = (String, ContributorRecord);
+
 struct ExportPage {
     records: Vec<(String, ContributorRecord)>,
-    next_cursor: Option<u32>,
+    next_cursor: Option<BytesN<8>>,
     total: u32,
+    merkle_root: BytesN<32>,
     has_more: bool,
 }
 ```
 
 ### BatchSummary
 
-Returned by `batch_verify`. `success_rate` is an integer percentage.
+Returned by `batch_verify`. `success_rate` is an integer percentage calculated
+using standard half-up rounding `(successful * 100 + total / 2) / total`:
+- Returns `0` if `total == 0` or `successful == 0`.
+- Returns `100` if `successful >= total` (clamped).
+- Fractional ratios round to the nearest whole integer (half rounds up, e.g. 1/3 = 33%, 2/3 = 67%, 1/6 = 17%, 5/6 = 83%).
 
 ```rust
 struct BatchSummary {
@@ -864,11 +873,11 @@ that budget while still allowing full export via a cursor loop.
 
 | Field | Type | Semantics |
 |-------|------|-----------|
-| `records` | `Vec<(String, ContributorRecord)>` | Current page |
-| `next_cursor` | `Option<u32>` | Next zero-based index offset, or `None` when done |
+| `records` | `Vec<(String, ContributorRecord)>` | Current page records as `(username, ContributorRecord)` tuples |
+| `next_cursor` | `Option<BytesN<8>>` | Opaque cursor token for next page, or `None` when done |
 | `total` | `u32` | Live registration count |
-| `has_more` | `bool` | `true` when another page exists |
 | `merkle_root` | `BytesN<32>` | Merkle root over `records`, in page order (Issue #216) |
+| `has_more` | `bool` | `true` when another page exists |
 
 ### Merkle root over an export page (Issue #216)
 
@@ -916,19 +925,16 @@ non-member.
 
 #### ExportPage layout compatibility
 
-The checked-in golden layout at
-`abi/export_page.layout.golden` is enforced by
-`export_page_layout_preserves_golden_prefix`. Existing `ExportPage` fields must
-keep their names, types, and order. New fields may be appended and remain
-backward-compatible with existing dashboard parsers; inserting or reordering a
-field is a breaking change.
+The checked-in golden layout at `abi/export_page.layout.golden` is enforced by
+`export_page_layout_preserves_golden_prefix` in `tests/export_page_layout.rs`.
+Existing `ExportPage` and `ExportRecord` fields must keep their names, types, and
+order. Documented layout version: `EXPORT_PAGE_LAYOUT_VERSION = 2`.
 
-To intentionally accept a breaking layout change, update the golden file in the
-same commit, increment the ABI/schema version recorded in the release change,
-and document the old and new field order in the pull request. The layout test
-must pass with the updated golden before release.
-
-### `get_registered_paginated(cursor: u32, limit: u32) -> Result<ExportPage, ContractError>`
+To intentionally accept a breaking layout change:
+1. Update `abi/export_page.layout.golden` in the same commit.
+2. Increment `EXPORT_PAGE_LAYOUT_VERSION` in `src/storage.rs` and TS bindings.
+3. Update consumers and documentation to reflect the new field order and types.
+The layout regression tests must pass with the updated golden before release.
 
 
 ---
@@ -1150,7 +1156,7 @@ footprint limit. Same shape as `get_all_registered` — no `verified` flag; use
 
 ---
 
-### `get_registered_paginated(cursor: u32, limit: u32) -> Result<ExportPage, ContractError>`
+### `get_registered_paginated(cursor: Option<BytesN<8>>, limit: u32) -> Result<ExportPage, ContractError>`
 
 Admin-gated paginated export. Each entry is a full `ContributorRecord`, so the
 `verified` bit travels with every row — no second call or cross-reference
@@ -1168,12 +1174,12 @@ against `get_address` is needed to know verification status (Issue #96).
 
 ```bash
 stellar contract invoke --id $ID --source admin --network testnet \
-  -- get_registered_paginated --cursor 0 --limit 50
+  -- get_registered_paginated --cursor null --limit 50
 ```
 
 ---
 
-### `get_public_paginated(cursor: u32, limit: u32) -> Result<ExportPage, ContractError>`
+### `get_public_paginated(cursor: Option<BytesN<8>>, limit: u32) -> Result<ExportPage, ContractError>`
 
 Same `ExportPage` shape as `get_registered_paginated` — including the
 `verified` flag per record — but callable by anyone. This is the
@@ -1184,11 +1190,11 @@ username + address + verified without an admin key (Issue #96).
 |---|---|
 | **Auth** | None |
 | **Mutates** | No |
-| **Errors** | `NotInitialized`, `Paused` |
+| **Errors** | `NotInitialized` |
 
 ```bash
 stellar contract invoke --id $ID --source deployer --network testnet \
-  -- get_public_paginated --cursor 0 --limit 50
+  -- get_public_paginated --cursor null --limit 50
 ```
 
 ---
@@ -1249,7 +1255,9 @@ verified since the off-chain job built its list.
 | Not registered | `failed` | Skipped, batch continues |
 | Already verified | `failed` | Skipped — idempotent, so re-runs are safe |
 
-Inspect the returned `BatchSummary`: a `success_rate` below 100 means some
+Inspect the returned `BatchSummary`: `success_rate` reports the rounded integer
+percentage of successful verifications using round-half-up (e.g. 1/3 = 33%,
+2/3 = 67%, 0/N = 0%, N/N = 100%). A `success_rate` below 100 means some
 entries need attention, **not** that the batch failed. The errors listed above
 are the only conditions that abort the whole call, and all of them invalidate
 every entry rather than a single one.
